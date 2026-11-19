@@ -120,6 +120,9 @@ jobs:
         shell: bash
         run: |
           git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
+          # Bootstrap CIPD packages and the hermetic Python runtime before
+          # invoking depot_tools commands from this fresh checkout.
+          "$RUNNER_TEMP/depot_tools/ensure_bootstrap"
           echo "$RUNNER_TEMP/depot_tools" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/depot_tools/python-bin" >> "$GITHUB_PATH"
           echo "DEPOT_TOOLS_UPDATE=0" >> "$GITHUB_ENV"
