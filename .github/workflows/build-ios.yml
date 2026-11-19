@@ -18,7 +18,7 @@ concurrency:
 jobs:
   webkit:
     name: iOS Chromium (WebKit)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 360
     steps:
       - name: Check out workflow repository
@@ -30,7 +30,6 @@ jobs:
           set -euxo pipefail
           df -h /
           rm -rf "$HOME/Library/Android" "$HOME/.gradle/caches" "$HOME/.npm" || true
-          sudo rm -rf /Library/Developer/CoreSimulator/Volumes/* || true
           df -h /
 
       - name: Install depot_tools
@@ -38,6 +37,7 @@ jobs:
         run: |
           git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
           echo "$RUNNER_TEMP/depot_tools" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/depot_tools/python-bin" >> "$GITHUB_PATH"
           echo "DEPOT_TOOLS_UPDATE=0" >> "$GITHUB_ENV"
 
       - name: Fetch Chromium iOS source
@@ -47,16 +47,26 @@ jobs:
           set -euxo pipefail
           mkdir -p chromium-webkit
           cd chromium-webkit
-          fetch --nohooks ios
+          fetch --no-history --nohooks ios
           cd src
           gclient sync
 
-      - name: Generate unsigned WebKit iOS build
+      - name: Configure unsigned WebKit device build
+        shell: bash
+        working-directory: ${{ runner.temp }}/chromium-webkit
+        run: |
+          set -euxo pipefail
+          cat > .setup-gn <<'EOF'
+          [gn_args]
+          ios_enable_code_signing = false
+          EOF
+          python3 src/ios/build/tools/setup-gn.py
+
+      - name: Build Chromium for iOS (WebKit)
         shell: bash
         working-directory: ${{ runner.temp }}/chromium-webkit/src
         run: |
           set -euxo pipefail
-          gn gen out/Release-iphoneos --args='target_os="ios" target_cpu="arm64" target_environment="device" is_debug=false ios_enable_code_signing=false use_blink=false'
           autoninja -C out/Release-iphoneos chrome
 
       - name: Package unsigned IPA
@@ -64,13 +74,13 @@ jobs:
         working-directory: ${{ runner.temp }}/chromium-webkit/src
         run: |
           set -euxo pipefail
-          APP="$(find out/Release-iphoneos -maxdepth 4 -type d -name 'Chromium.app' -print -quit)"
-          if [[ -z "$APP" ]]; then
-            APP="$(find out/Release-iphoneos -maxdepth 4 -type d -name 'Chrome.app' -print -quit)"
+          APP="out/Release-iphoneos/Chromium.app"
+          if [[ ! -d "$APP" ]]; then
+            APP="$(find out/Release-iphoneos -maxdepth 5 -type d \( -name 'Chromium.app' -o -name 'Chrome.app' \) -print -quit)"
           fi
-          if [[ -z "$APP" ]]; then
-            echo "::error::The chrome target built, but no Chromium.app or Chrome.app was found."
-            find out/Release-iphoneos -maxdepth 4 -type d -name '*.app' -print
+          if [[ -z "$APP" || ! -d "$APP" ]]; then
+            echo "::error::The chrome target completed, but no Chromium.app/Chrome.app bundle was found."
+            find out/Release-iphoneos -maxdepth 5 -type d -name '*.app' -print
             exit 1
           fi
           mkdir -p "$GITHUB_WORKSPACE/artifacts/webkit/Payload"
@@ -90,7 +100,7 @@ jobs:
 
   blink:
     name: iOS Chromium (Blink)
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 360
     steps:
       - name: Check out workflow repository
@@ -102,7 +112,6 @@ jobs:
           set -euxo pipefail
           df -h /
           rm -rf "$HOME/Library/Android" "$HOME/.gradle/caches" "$HOME/.npm" || true
-          sudo rm -rf /Library/Developer/CoreSimulator/Volumes/* || true
           df -h /
 
       - name: Install depot_tools
@@ -110,6 +119,7 @@ jobs:
         run: |
           git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
           echo "$RUNNER_TEMP/depot_tools" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/depot_tools/python-bin" >> "$GITHUB_PATH"
           echo "DEPOT_TOOLS_UPDATE=0" >> "$GITHUB_ENV"
 
       - name: Fetch Chromium iOS source
@@ -119,30 +129,43 @@ jobs:
           set -euxo pipefail
           mkdir -p chromium-blink
           cd chromium-blink
-          fetch --nohooks ios
+          fetch --no-history --nohooks ios
           cd src
           gclient sync
 
-      - name: Generate unsigned Blink iOS build
+      - name: Configure unsigned Blink device build
+        shell: bash
+        working-directory: ${{ runner.temp }}/chromium-blink
+        run: |
+          set -euxo pipefail
+          cat > .setup-gn <<'EOF'
+          [gn_args]
+          ios_enable_code_signing = false
+          use_blink = true
+          ios_content_shell_bundle_identifier = "org.chromium.content_shell.ios.dev"
+          ios_chromium_bundle_id = "org.chromium.chrome.ios.dev"
+          EOF
+          python3 src/ios/build/tools/setup-gn.py
+
+      - name: Build Chromium for iOS (Blink)
         shell: bash
         working-directory: ${{ runner.temp }}/chromium-blink/src
         run: |
           set -euxo pipefail
-          gn gen out/Release-iphoneos --args='target_os="ios" target_cpu="arm64" target_environment="device" is_debug=false ios_enable_code_signing=false use_blink=true ios_chromium_bundle_id="org.chromium.chrome.ios.dev" ios_content_shell_bundle_identifier="org.chromium.content_shell.ios.dev"'
-          autoninja -C out/Release-iphoneos chrome
+          autoninja -C out/Release-iphoneos chrome content_shell
 
       - name: Package unsigned IPA
         shell: bash
         working-directory: ${{ runner.temp }}/chromium-blink/src
         run: |
           set -euxo pipefail
-          APP="$(find out/Release-iphoneos -maxdepth 4 -type d -name 'Chromium.app' -print -quit)"
-          if [[ -z "$APP" ]]; then
-            APP="$(find out/Release-iphoneos -maxdepth 4 -type d -name 'Chrome.app' -print -quit)"
+          APP="out/Release-iphoneos/Chromium.app"
+          if [[ ! -d "$APP" ]]; then
+            APP="$(find out/Release-iphoneos -maxdepth 5 -type d \( -name 'Chromium.app' -o -name 'Chrome.app' \) -print -quit)"
           fi
-          if [[ -z "$APP" ]]; then
-            echo "::error::The Blink chrome target built, but no Chromium.app or Chrome.app was found."
-            find out/Release-iphoneos -maxdepth 4 -type d -name '*.app' -print
+          if [[ -z "$APP" || ! -d "$APP" ]]; then
+            echo "::error::The Blink chrome target completed, but no Chromium.app/Chrome.app bundle was found."
+            find out/Release-iphoneos -maxdepth 5 -type d -name '*.app' -print
             exit 1
           fi
           mkdir -p "$GITHUB_WORKSPACE/artifacts/blink/Payload"
