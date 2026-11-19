@@ -16,7 +16,7 @@ concurrency:
 jobs:
   webkit:
     name: iOS Chromium (WebKit)
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 360
     steps:
       - name: Check out workflow repository
@@ -102,7 +102,7 @@ jobs:
 
   blink:
     name: iOS Chromium (Blink)
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 360
     steps:
       - name: Check out workflow repository
@@ -147,7 +147,7 @@ jobs:
           [gn_args]
           ios_enable_code_signing = false
           use_blink = true
-          ios_content_shell_bundle_identifier = "org.chromium.content_shell.ios.dev"
+          ios_content_shell_bundle_identifier = "org.chromium.content-shell.ios.dev"
           ios_chromium_bundle_id = "org.chromium.chrome.ios.dev"
           EOF
           python3 src/ios/build/tools/setup-gn.py
