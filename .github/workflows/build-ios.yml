@@ -34,8 +34,12 @@ jobs:
         shell: bash
         run: |
           git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
+          # A fresh depot_tools checkout has no hermetic python yet. Bootstrap
+          # CIPD packages and python before invoking fetch/gclient/autoninja.
+          "$RUNNER_TEMP/depot_tools/ensure_bootstrap"
           echo "$RUNNER_TEMP/depot_tools" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/depot_tools/python-bin" >> "$GITHUB_PATH"
+          # Pin the freshly bootstrapped checkout for the rest of this job.
           echo "DEPOT_TOOLS_UPDATE=0" >> "$GITHUB_ENV"
 
       - name: Fetch Chromium iOS source
