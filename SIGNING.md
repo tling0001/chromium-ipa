@@ -9,7 +9,7 @@ Under **Settings → Secrets and variables → Actions**, configure:
 - APPLE_API_KEY_P8: entire contents of the downloaded Team API .p8 file, including the BEGIN/END PRIVATE KEY lines.
 - APPLE_API_KEY_ID: the API key ID.
 - APPLE_API_ISSUER_ID: the issuer ID.
-- GH_SECRETS_TOKEN: a fine-grained GitHub personal access token limited to this repository, with **Secrets: read and write** (write is required; read is useful for verification).
+- GH_SECRETS_TOKEN: a fine-grained GitHub personal access token limited to this repository, with Secrets: read and write permission.
 
 The Apple API key must be a **Team API Key** with the **Admin** role. Individual API keys do not support provisioning operations.
 
@@ -23,6 +23,22 @@ The first signing run creates an Apple iOS Distribution certificate and a privat
 The workflow's built-in GITHUB_TOKEN cannot write repository secrets. GH_SECRETS_TOKEN is a separate, least-privilege credential used only to save the generated signing identity. Subsequent runs reuse that certificate rather than creating another one and consuming Apple's limited distribution-certificate slots.
 
 Create the GitHub token at https://github.com/settings/personal-access-tokens/new. Choose **Fine-grained token**, select only the tling0001/chromium-ipa repository, and grant **Secrets: Read and write**. Add the token as GH_SECRETS_TOKEN. Do not paste it into chat or commit it.
+
+## Bundle IDs and App Groups
+
+The build now uses the account-specific prefix com.tling0001 instead of Google's org.chromium prefix. This avoids attempting to register Chromium's original Google-owned identifiers under your Apple team.
+
+The signing workflow automatically registers the app and extension Bundle IDs, enables the App Groups capability, and enables AutoFill Credential Provider for the main app and Credential Provider extension.
+
+**One Apple Developer portal step remains for App Groups:** Apple's public App Store Connect API can turn on APP_GROUPS but does not expose the App Group container registration and assignment operations. After the first signing run creates the Bundle IDs, open Certificates, Identifiers & Profiles:
+
+1. Register these two App Groups:
+   - group.com.tling0001.chrome
+   - group.com.tling0001.common
+2. For every Chromium App ID created by the signing workflow, edit the App ID, enable App Groups, and assign both groups.
+3. Save the changes, then run the signing workflow again so its new Ad Hoc profiles include the group entitlements.
+
+Apple documents App Groups and the required assignment process here: https://developer.apple.com/help/account/identifiers/enable-app-capabilities/
 
 ## Run signing
 
