@@ -48,6 +48,13 @@ class Apple:
             if x.get("attributes",{}).get("identifier")==bid: return x["id"]
         x=self.req("POST","/bundleIds",json={"data":{"type":"bundleIds","attributes":{"identifier":bid,"name":("Chromium "+bid)[:100],"platform":"IOS"}}})
         print("Created App ID:",bid); return x["data"]["id"]
+    def ensure_capability(self,bundle_id_id,capability):
+        current=self.pages(f"/bundleIds/{bundle_id_id}/bundleIdCapabilities?limit=200")
+        if any(x.get("attributes",{}).get("capabilityType")==capability for x in current):
+            print(f"Capability already enabled: {capability}")
+            return
+        self.req("POST","/bundleIdCapabilities",json={"data":{"type":"bundleIdCapabilities","attributes":{"capabilityType":capability},"relationships":{"bundleId":{"data":{"type":"bundleIds","id":bundle_id_id}}}}})
+        print(f"Enabled capability: {capability}")
     def certs(self):
         return self.pages("/certificates?filter[certificateType]=IOS_DISTRIBUTION&limit=200&fields[certificates]=certificateType,serialNumber,activated,expirationDate")
     def create_cert(self,work):
@@ -128,6 +135,11 @@ def sign_bundle(bundle,profile,identity,work):
         ent["keychain-access-groups"]=[x.replace("$(AppIdentifierPrefix)",prefix+".") for x in ent["keychain-access-groups"]]
     if allowed.get(EVA) is not True:
         print(f"::warning::Profile for {identifier} does not authorize {EVA}; signature will be valid only for allowed entitlements and the known startup crash may remain.")
+    groups=allowed.get("com.apple.security.application-groups",[])
+    expected={"group.com.tling0001.chrome","group.com.tling0001.common"}
+    if not expected.issubset(set(groups)):
+        missing=", ".join(sorted(expected-set(groups)))
+        print(f"::warning::Profile for {identifier} is missing Chromium App Groups: {missing}. APP_GROUPS is enabled, but the group containers must be registered and assigned to this App ID in the Apple Developer portal.")
     (bundle/"embedded.mobileprovision").write_bytes(profile.read_bytes())
     ep=work/(re.sub(r"[^A-Za-z0-9_.-]","_",identifier)+".plist")
     ep.write_bytes(plistlib.dumps(ent,fmt=plistlib.FMT_XML,sort_keys=True))
@@ -168,6 +180,9 @@ def main():
     profile_dir=work/"profiles"; profile_dir.mkdir(exist_ok=True)
     for bundle in bundles:
         identifier=bid(bundle); app_id=apple.appid(identifier)
+        apple.ensure_capability(app_id,"APP_GROUPS")
+        if bundle == root or identifier.endswith(".CredentialProviderExtension"):
+            apple.ensure_capability(app_id,"AUTOFILL_CREDENTIAL_PROVIDER")
         filename=re.sub(r"[^A-Za-z0-9_.-]","_",identifier)+".mobileprovision"
         profile=profile_dir/filename
         data=apple.profile("Chromium Ad Hoc "+identifier,app_id,cert_id,[d["id"] for d in enabled],profile)
@@ -187,6 +202,7 @@ def main():
     run("ditto","-c","-k","--sequesterRsrc","--keepParent",str(payload),str(out))
     print(run("shasum","-a","256",str(out),capture=True).strip())
     print(f"Ad Hoc IPA signed. {len(bundles)} app/extension bundle(s), {len(enabled)} registered enabled devices.")
+    print("If App Group warnings appeared, register group.com.tling0001.chrome and group.com.tling0001.common in Certificates, Identifiers & Profiles, then assign both groups to every Chromium app/extension App ID before relying on cross-extension sharing.")
 
 if __name__=="__main__":
     try: main()
