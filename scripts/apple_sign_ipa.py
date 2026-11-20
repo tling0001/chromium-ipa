@@ -46,7 +46,11 @@ class Apple:
     def appid(self,bid):
         for x in self.pages("/bundleIds?filter[identifier]="+quote(bid,safe="")+"&filter[platform]=IOS&limit=200"):
             if x.get("attributes",{}).get("identifier")==bid: return x["id"]
-        x=self.req("POST","/bundleIds",json={"data":{"type":"bundleIds","attributes":{"identifier":bid,"name":("Chromium "+bid)[:100],"platform":"IOS"}}})
+        # App ID display names are stricter than bundle identifiers: Apple
+        # accepts only ASCII letters, digits, and spaces (no dots/underscores).
+        display_name=re.sub(r"[^A-Za-z0-9 ]+", " ", "Chromium "+bid)
+        display_name=" ".join(display_name.split())[:100] or "Chromium iOS"
+        x=self.req("POST","/bundleIds",json={"data":{"type":"bundleIds","attributes":{"identifier":bid,"name":display_name,"platform":"IOS"}}})
         print("Created App ID:",bid); return x["data"]["id"]
     def ensure_capability(self,bundle_id_id,capability):
         current=self.pages(f"/bundleIds/{bundle_id_id}/bundleIdCapabilities?limit=200")
