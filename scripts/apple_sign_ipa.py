@@ -167,18 +167,6 @@ def main():
     if not enabled: raise RuntimeError("No ENABLED iOS devices registered with this Apple team.")
     if len(enabled)>100: raise RuntimeError(f"Found {len(enabled)} enabled iOS devices; Ad Hoc profiles support at most 100.")
     print(f"Including all {len(enabled)} enabled registered iOS devices; no UDID input is needed.")
-    keychain=Path(env("RUNNER_TEMP","/tmp"))/"chromium-auto-sign.keychain-db"
-    kp=secrets.token_urlsafe(24)
-    run("security","create-keychain","-p",kp,str(keychain))
-    run("security","set-keychain-settings","-lut","21600",str(keychain))
-    run("security","unlock-keychain","-p",kp,str(keychain))
-    run("security","import",str(p12),"-k",str(keychain),"-P",pw,"-T","/usr/bin/codesign","-T","/usr/bin/security")
-    run("security","set-key-partition-list","-S","apple-tool:,apple:","-s","-k",kp,str(keychain))
-    run("security","list-keychains","-d","user","-s",str(keychain))
-    ident=run("security","find-identity","-v","-p","codesigning",str(keychain),capture=True)
-    m=re.search(r"([0-9A-F]{40})",ident)
-    if not m: raise RuntimeError("Imported P12 is not a valid Apple code-signing identity.")
-    identity=m.group(1)
     unpack=work/"unpacked"; unpack.mkdir(exist_ok=True)
     run("ditto","-x","-k",str(source),str(unpack))
     payload=unpack/"Payload"; roots=list(payload.glob("*.app"))
@@ -205,6 +193,23 @@ def main():
 
     # Provisioning starts only after the IPA's IDs pass the ownership check.
     p12,pw,cert_id=signing_cert(apple,work)
+
+    # Import only after signing_cert has returned a real P12 and password.
+    # Keep keychain creation after IPA ownership validation as well, so a
+    # rejected upstream IPA never leaves an unnecessary signing identity.
+    keychain=Path(env("RUNNER_TEMP","/tmp"))/"chromium-auto-sign.keychain-db"
+    kp=secrets.token_urlsafe(24)
+    run("security","create-keychain","-p",kp,str(keychain))
+    run("security","set-keychain-settings","-lut","21600",str(keychain))
+    run("security","unlock-keychain","-p",kp,str(keychain))
+    run("security","import",str(p12),"-k",str(keychain),"-P",pw,"-T","/usr/bin/codesign","-T","/usr/bin/security")
+    run("security","set-key-partition-list","-S","apple-tool:,apple:","-s","-k",kp,str(keychain))
+    run("security","list-keychains","-d","user","-s",str(keychain))
+    ident=run("security","find-identity","-v","-p","codesigning",str(keychain),capture=True)
+    m=re.search(r"([0-9A-F]{40})",ident)
+    if not m: raise RuntimeError("Imported P12 is not a valid Apple code-signing identity.")
+    identity=m.group(1)
+
     profile_dir=work/"profiles"; profile_dir.mkdir(exist_ok=True)
     for bundle in bundles:
         identifier=bid(bundle); app_id=apple.appid(identifier)
