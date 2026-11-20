@@ -54,12 +54,14 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           GH_SECRETS_TOKEN: ${{ secrets.GH_SECRETS_TOKEN }}
+          APPLE_AUTO_SIGNING_P12_BASE64: ${{ secrets.APPLE_AUTO_SIGNING_P12_BASE64 }}
+          APPLE_AUTO_SIGNING_P12_PASSWORD: ${{ secrets.APPLE_AUTO_SIGNING_P12_PASSWORD }}
         run: |
           set -euo pipefail
           [[ -n "$APPLE_API_KEY_P8" ]] || { echo "::error::Missing APPLE_API_KEY_P8"; exit 1; }
           [[ -n "$APPLE_API_KEY_ID" ]] || { echo "::error::Missing APPLE_API_KEY_ID"; exit 1; }
           [[ -n "$APPLE_API_ISSUER_ID" ]] || { echo "::error::Missing APPLE_API_ISSUER_ID"; exit 1; }
-          [[ -n "$GH_SECRETS_TOKEN" ]] || { echo "::error::Missing GH_SECRETS_TOKEN (fine-grained PAT with repository Secrets: write permission)"; exit 1; }
+          if [[ -z "$APPLE_AUTO_SIGNING_P12_BASE64" || -z "$APPLE_AUTO_SIGNING_P12_PASSWORD" ]]; then\n            [[ -n "$GH_SECRETS_TOKEN" ]] || { echo "::error::First signing run requires GH_SECRETS_TOKEN (fine-grained PAT with repository Secrets: write permission) to save the generated certificate."; exit 1; }\n          fi
           if [[ "$SOURCE_MODE" == "run_id" && ! "$INPUT_RUN_ID" =~ ^[0-9]+$ ]]; then echo "::error::Enter a numeric build run ID."; exit 1; fi
           if [[ "$SOURCE_MODE" == "url" && ! "$IPA_URL" =~ ^https:// ]]; then echo "::error::ipa_url must be HTTPS."; exit 1; fi
 
