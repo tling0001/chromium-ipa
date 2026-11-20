@@ -54,7 +54,13 @@ You do not need to run **Register Apple Devices for Chromium** if your devices a
 
 Chromium's known PartitionAlloc startup crash is associated with com.apple.developer.kernel.extended-virtual-addressing. Apple's public App Store Connect API CapabilityType enum does not list Extended Virtual Addressing, so this workflow cannot enable it through the documented API. The signing script checks each generated profile and warns if the profile does not authorize this entitlement. It signs only with entitlements Apple's profile authorizes; it never fabricates a provisioning-profile grant.
 
-Therefore, a successfully signed Ad Hoc IPA is not proof that the earlier startup crash is fixed. If the profile lacks Extended Virtual Addressing, the app may still crash on launch. Apple documents the entitlement and the provisioning-profile allowlist model:
+Therefore, a successfully signed Ad Hoc IPA is not proof that the earlier startup crash is fixed. If the profile lacks Extended Virtual Addressing, the app may still crash on launch.
+
+After the first run creates the main App ID, open **Certificates, Identifiers & Profiles → Identifiers → com.tling0001.chrome.ios.dev → Capability Requests**. If Extended Virtual Addressing is offered there, submit the request as Account Holder. If Apple approves it, enable the capability for the main App ID in the Capabilities tab, then rerun signing. The signing helper will detect whether the resulting provisioning profile includes the entitlement. If the capability is not offered in Capability Requests, contact Apple Developer Support and ask whether this entitlement can be assigned to your team for an iOS app using PartitionAlloc.
+
+Apple documents managed-capability approval and profile behavior here: https://developer.apple.com/help/account/reference/provisioning-with-managed-capabilities/
+
+Apple also documents the entitlement and provisioning-profile allowlist model:
 
 - https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.kernel.extended-virtual-addressing
 - https://developer.apple.com/documentation/appstoreconnectapi/capabilitytype
