@@ -1,0 +1,56 @@
+name: Register Apple Devices for Chromium
+
+on:
+  workflow_dispatch:
+    inputs:
+      device_udids:
+        description: Optional iPhone/iPad UDIDs to register (40 hex characters; comma, space, or newline separated)
+        required: false
+        type: string
+      device_name_prefix:
+        description: Name prefix for newly registered devices
+        required: false
+        default: Chromium sideload
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-device-registration
+  cancel-in-progress: false
+
+jobs:
+  register:
+    name: Register requested UDIDs and enumerate eligible devices
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install API client dependencies
+        run: python -m pip install --disable-pip-version-check PyJWT[crypto] requests
+
+      - name: Register devices and list all eligible devices
+        shell: bash
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          DEVICE_UDIDS: ${{ inputs.device_udids }}
+          DEVICE_NAME_PREFIX: ${{ inputs.device_name_prefix }}
+        run: python scripts/apple_devices.py
+
+      - name: Upload device report
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-registered-ios-devices
+          path: apple-device-report.json
+          if-no-files-found: error
+          retention-days: 7
