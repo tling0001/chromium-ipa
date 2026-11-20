@@ -120,7 +120,7 @@ jobs:
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           APPLE_AUTO_SIGNING_P12_BASE64: ${{ secrets.APPLE_AUTO_SIGNING_P12_BASE64 }}
           APPLE_AUTO_SIGNING_P12_PASSWORD: ${{ secrets.APPLE_AUTO_SIGNING_P12_PASSWORD }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_SECRETS_TOKEN: ${{ secrets.GH_SECRETS_TOKEN }}
         run: |
           set -euo pipefail
           IPA="$(find source-artifact -type f -name '*.ipa' -print -quit)"
