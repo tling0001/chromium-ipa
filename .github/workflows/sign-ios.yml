@@ -69,6 +69,11 @@ jobs:
           selected=""
           while IFS= read -r id; do
             [[ -n "$id" ]] || continue
+            conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq '.conclusion')"
+            if [[ "$conclusion" != "success" ]]; then
+              echo "Skipping run $id because its conclusion is '$conclusion'."
+              continue
+            fi
             artifact_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" --jq ".artifacts[] | select(.name == \"$artifact\" and .expired == false) | .id" | head -n 1)"
             if [[ -n "$artifact_id" ]]; then selected="$id"; break; fi
           done <<< "$candidate_ids"
