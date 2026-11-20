@@ -38,8 +38,23 @@ def main():
     for p in sorted(code, key=lambda x: len(x.parts), reverse=True):
         run("codesign", "--force", "--sign", identity, "--timestamp=none", str(p))
     for bundle in bundles:
-        profile_path, ent, _ = selected[bundle]
+        profile_path, profile_entitlements, app_id = selected[bundle]
         (bundle / "embedded.mobileprovision").write_bytes(profile_path.read_bytes())
+
+        # Provisioning profiles commonly contain wildcard App IDs. The signed
+        # app must carry concrete identifiers, not the profile's wildcard.
+        ent = dict(profile_entitlements)
+        prefix = app_id.split(".", 1)[0]
+        concrete_app_id = prefix + "." + bid(bundle)
+        ent["application-identifier"] = concrete_app_id
+        if "com.apple.developer.team-identifier" in ent:
+            ent["com.apple.developer.team-identifier"] = prefix
+        if "keychain-access-groups" in ent:
+            ent["keychain-access-groups"] = [
+                (prefix + "." + bid(bundle)) if group == prefix + ".*" else
+                group.replace("$(AppIdentifierPrefix)", prefix + ".")
+                for group in ent["keychain-access-groups"]
+            ]
         with tempfile.NamedTemporaryFile(suffix=".plist", delete=False) as tmp:
             ep = Path(tmp.name); ep.write_bytes(plistlib.dumps(ent, fmt=plistlib.FMT_XML, sort_keys=True))
         try: run("codesign", "--force", "--sign", identity, "--timestamp=none", "--entitlements", str(ep), str(bundle))
