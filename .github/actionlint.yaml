@@ -1,2 +1,3 @@
-runner-label:
-  - xcode-27
+self-hosted-runner:
+  labels:
+    - xcode-27
