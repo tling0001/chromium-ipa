@@ -53,7 +53,8 @@ class Apple:
         x=self.req("POST","/bundleIds",json={"data":{"type":"bundleIds","attributes":{"identifier":bid,"name":display_name,"platform":"IOS"}}})
         print("Created App ID:",bid); return x["data"]["id"]
     def ensure_capability(self,bundle_id_id,capability):
-        current=self.pages(f"/bundleIds/{bundle_id_id}/bundleIdCapabilities?limit=200")
+        # Apple does not allow the generic collection `limit` parameter on this relationship endpoint.
+        current=self.pages(f"/bundleIds/{bundle_id_id}/bundleIdCapabilities")
         if any(x.get("attributes",{}).get("capabilityType")==capability for x in current):
             print(f"Capability already enabled: {capability}")
             return
