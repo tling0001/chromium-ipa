@@ -1,0 +1,28 @@
+name: Validate signing automation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/apple_sign_ipa.py"
+      - "scripts/apple_devices.py"
+      - ".github/workflows/sign-ios.yml"
+      - ".github/workflows/apple-device-registration.yml"
+      - ".github/workflows/validate-signing.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Python helpers
+        run: python -m py_compile scripts/apple_sign_ipa.py scripts/apple_devices.py
+      - name: Validate GitHub Actions workflow syntax
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@latest
