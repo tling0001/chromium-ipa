@@ -172,9 +172,6 @@ def main():
         profile=profile_dir/filename
         data=apple.profile("Chromium Ad Hoc "+identifier,app_id,cert_id,[d["id"] for d in enabled],profile)
         print(f"Created Ad Hoc profile for {identifier} ({data.get('id')}).")
-        bundle._profile_path=profile if False else None
-        # Store mapping separately because pathlib objects do not support arbitrary attrs.
-        (profile_dir/(filename+".path")).write_text(str(bundle),encoding="utf-8")
     # Sign nested Mach-O code before extensions and the main application.
     code=[]
     for p in root.rglob("*"):
