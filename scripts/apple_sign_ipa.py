@@ -71,8 +71,8 @@ class Apple:
         return x
 
 def gh_secret(name,value):
-    token=env("GITHUB_TOKEN"); repo=env("GITHUB_REPOSITORY")
-    if not token or not repo: raise RuntimeError("GITHUB_TOKEN/repository missing; cannot persist signing identity.")
+    token=env("GH_SECRETS_TOKEN"); repo=env("GITHUB_REPOSITORY")
+    if not token or not repo: raise RuntimeError("GH_SECRETS_TOKEN/repository missing; create a fine-grained token with repository Secrets: write permission to persist the signing identity.")
     s=requests.Session(); s.headers.update({"Authorization":"Bearer "+token,"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"})
     base=f"https://api.github.com/repos/{repo}/actions/secrets"
     r=s.get(base+"/public-key",timeout=30)
