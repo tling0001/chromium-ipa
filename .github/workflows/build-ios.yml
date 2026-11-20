@@ -63,6 +63,7 @@ jobs:
           cat > .setup-gn <<'EOF'
           [gn_args]
           ios_enable_code_signing = false
+          ios_app_bundle_id_prefix = "com.tling0001"
           EOF
           python3 src/ios/build/tools/setup-gn.py
 
