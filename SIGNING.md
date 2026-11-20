@@ -1,64 +1,32 @@
-# Signing an iOS Chromium IPA
+# Apple API credentials and automated device registration
 
-The **Sign Chromium iOS IPA** workflow is a manual, separate workflow. It does not rebuild Chromium or change the unsigned build workflow.
+The repository uses a **Team API Key** to call Apple's App Store Connect API. The private key is never written to the repository or uploaded as an artifact.
 
-## Required GitHub Actions secrets
+## Required repository secrets
 
-Create these under **Settings → Secrets and variables → Actions → Repository secrets**:
+Under **Settings → Secrets and variables → Actions**, configure:
 
-- `APPLE_CERTIFICATE_P12_BASE64`: Base64-encoded Apple iOS Development signing certificate, including its private key, exported as a password-protected `.p12`.
-- `APPLE_CERTIFICATE_PASSWORD`: Password used when exporting that `.p12`.
-- `IOS_PROVISIONING_PROFILES_ZIP_BASE64`: Base64-encoded ZIP containing the `.mobileprovision` profiles for the app and every embedded app extension.
+- `APPLE_API_KEY_P8`: entire contents of the downloaded `.p8` file, including the BEGIN/END PRIVATE KEY lines.
+- `APPLE_API_KEY_ID`: the key ID shown in App Store Connect.
+- `APPLE_API_ISSUER_ID`: the issuer ID shown in App Store Connect.
 
-The signing identity and provisioning profiles must belong to the same Apple Developer team. The profiles must be valid for the device(s) on which you intend to install the app and must authorize the entitlements used by their respective bundles.
+Use a **Team API Key** with the **Admin** role. Individual API keys cannot access Apple's provisioning endpoints.
 
-### Prepare the secrets on Windows 11
+## Register devices
 
-You can prepare the Base64 secret values on Windows; no local Mac, Xcode, WSL, or OpenSSL is needed.
+1. Open **Actions → Register Apple Devices for Chromium**.
+2. Choose **Run workflow**.
+3. Paste one or more iPhone/iPad UDIDs into `device_udids`. Separate them with commas, spaces, or new lines. Leave it blank to only list existing devices.
+4. Run the workflow.
 
-1. Export or obtain your Apple iOS signing certificate as a password-protected `.p12` **including its private key**. If you do not already have this file, see the limitation below.
-2. Put the `.p12` file in a private folder.
-3. Create a folder containing the `.mobileprovision` files for the Chromium main app and every embedded app extension.
-4. Open PowerShell in the repository folder and run:
+The workflow checks the team's registered iOS devices first, registers only UDIDs that are not already present, then refreshes the list and reports all devices with status `ENABLED`. It does not disable or remove existing devices.
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\prepare-signing-secrets.ps1 -P12Path "C:\Path\To\ios-signing-certificate.p12" -ProfilesFolder "C:\Path\To\ProvisioningProfiles"
-```
+New registrations may not be immediately eligible for provisioning. Apple says registrations 11–100 can take 24–72 hours to become eligible. Devices with a status other than `ENABLED` are reported separately.
 
-The script creates `signing-secrets\APPLE_CERTIFICATE_P12_BASE64.txt` and `signing-secrets\IOS_PROVISIONING_PROFILES_ZIP_BASE64.txt`.
+The workflow uploads a short-lived `apple-registered-ios-devices` report artifact. Treat the UDIDs in that report as private.
 
-5. In GitHub, open **Settings → Secrets and variables → Actions → New repository secret**.
-6. Create:
-   - `APPLE_CERTIFICATE_P12_BASE64`: paste the entire contents of the first text file.
-   - `APPLE_CERTIFICATE_PASSWORD`: enter the password used to export the P12.
-   - `IOS_PROVISIONING_PROFILES_ZIP_BASE64`: paste the entire contents of the second text file.
-7. Delete the local `signing-secrets` folder after GitHub has saved the secrets. Never commit these files.
+## Signing status
 
-The PowerShell helper is [`scripts/prepare-signing-secrets.ps1`](scripts/prepare-signing-secrets.ps1).
+This workflow implements the Apple API authentication and device-registration stage. It does **not** yet create signing certificates, App IDs, provisioning profiles, or a signed IPA. The existing `Sign Chromium iOS IPA` workflow still uses the older manually exported certificate/profile secrets; do not run it expecting the three Apple API secrets to work there yet.
 
-**Certificate limitation:** Windows can encode an existing P12 and package profiles, but it cannot create an Apple-authorized iOS signing identity merely by editing an IPA. You need a valid Apple-issued certificate with its private key and matching provisioning profiles. If you only have a free Apple ID and Sideloadly, you may not have the certificate/profile capability required for this entitlement.
-
-**Entitlement limitation:** the main app's provisioning profile must explicitly authorize `com.apple.developer.kernel.extended-virtual-addressing=true`. The workflow checks this before signing. If the profile doesn't authorize it, the job stops; it cannot override Apple's provisioning restrictions.
-
-
-## Run it
-
-1. Open the repository's **Actions** tab.
-2. Select **Sign Chromium iOS IPA**.
-3. Click **Run workflow**.
-4. Choose the source:
-   - `latest_successful`: newest successful build run with the matching, unexpired WebKit/Blink artifact.
-   - `run_id`: a specific build run ID.
-   - `url`: a direct HTTPS URL to an IPA.
-5. Choose WebKit or Blink when using a build artifact.
-6. Download the resulting `chromium-ios-<variant>-signed` artifact from the signing run.
-
-The direct URL must point to the IPA file itself, not a GitHub Actions artifact webpage.
-
-## Notes
-
-- The signing workflow uses a temporary macOS keychain and removes its signing files and keychain at the end of the job.
-- Build artifacts expire according to the retention setting in the build workflow.
-- A valid signature does not guarantee installation: bundle IDs, device registration, App Groups, extension profiles, and all required entitlements must match.
-- Apple may restrict availability of particular capabilities for an account or App ID. The workflow cannot bypass Apple's provisioning rules.
+Before automating final signing, the workflow must verify that Apple will issue a profile carrying Chromium's required `com.apple.developer.kernel.extended-virtual-addressing` entitlement and any other entitlements required by the exact app bundle and extensions. A paid membership and a valid API key do not by themselves grant an entitlement.
