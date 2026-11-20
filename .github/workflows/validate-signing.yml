@@ -9,6 +9,7 @@ on:
       - ".github/workflows/sign-ios.yml"
       - ".github/workflows/apple-device-registration.yml"
       - ".github/workflows/validate-signing.yml"
+      - ".github/actionlint.yaml"
   workflow_dispatch:
 
 permissions:
