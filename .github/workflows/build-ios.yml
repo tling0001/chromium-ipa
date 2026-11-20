@@ -156,14 +156,15 @@ jobs:
           cat > .setup-gn <<'EOF'
           [gn_args]
           ios_enable_code_signing = false
+          ios_app_bundle_id_prefix = "com.tling0001"
           use_blink = true
           # Keep useful stack traces while omitting the very large Blink/V8
           # debug symbol sets; these do not affect runtime behavior or speed.
           symbol_level = 1
           blink_symbol_level = 0
           v8_symbol_level = 0
-          ios_content_shell_bundle_identifier = "org.chromium.content-shell.ios.dev"
-          ios_chromium_bundle_id = "org.chromium.chrome.ios.dev"
+          ios_content_shell_bundle_identifier = "com.tling0001.content-shell.ios.dev"
+          ios_chromium_bundle_id = "com.tling0001.chrome.ios.dev"
           EOF
           python3 src/ios/build/tools/setup-gn.py
 
