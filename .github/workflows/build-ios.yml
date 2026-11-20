@@ -15,6 +15,8 @@ concurrency:
 
 jobs:
   webkit:
+    # Commits marked [blink-only] intentionally skip the already-validated WebKit job.
+    if: ${{ !contains(github.event.head_commit.message, '[blink-only]') }}
     name: iOS Chromium (WebKit)
     runs-on: xcode-27
     timeout-minutes: 360
@@ -113,7 +115,15 @@ jobs:
         run: |
           set -euxo pipefail
           df -h /
-          rm -rf "$HOME/Library/Android" "$HOME/.gradle/caches" "$HOME/.npm" || true
+          rm -rf \
+            "$HOME/Library/Android" \
+            "$HOME/.gradle/caches" \
+            "$HOME/.npm" \
+            "$HOME/Library/Developer/Xcode/DerivedData" \
+            "$HOME/Library/Developer/Xcode/Archives" \
+            "$HOME/Library/Developer/CoreSimulator/Devices" \
+            "$HOME/Library/Caches" \
+            "$HOME/.cache" || true
           df -h /
 
       - name: Install depot_tools
@@ -147,6 +157,11 @@ jobs:
           [gn_args]
           ios_enable_code_signing = false
           use_blink = true
+          # Keep useful stack traces while omitting the very large Blink/V8
+          # debug symbol sets; these do not affect runtime behavior or speed.
+          symbol_level = 1
+          blink_symbol_level = 0
+          v8_symbol_level = 0
           ios_content_shell_bundle_identifier = "org.chromium.content-shell.ios.dev"
           ios_chromium_bundle_id = "org.chromium.chrome.ios.dev"
           EOF
@@ -157,7 +172,10 @@ jobs:
         working-directory: ${{ runner.temp }}/chromium-blink/src
         run: |
           set -euxo pipefail
-          autoninja -C out/Release-iphoneos chrome content_shell
+          df -h /
+          # chrome already depends on the Blink content-shell IPA target.
+          autoninja -C out/Release-iphoneos chrome
+          df -h /
 
       - name: Package unsigned IPA
         shell: bash
