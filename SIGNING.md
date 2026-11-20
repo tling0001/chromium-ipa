@@ -20,7 +20,7 @@ The first signing run creates an Apple iOS Distribution certificate and a privat
 - APPLE_AUTO_SIGNING_P12_BASE64
 - APPLE_AUTO_SIGNING_P12_PASSWORD
 
-The workflow's built-in GITHUB_TOKEN cannot write repository secrets. GH_SECRETS_TOKEN is a separate, least-privilege credential used only to save the generated signing identity. Subsequent runs reuse that certificate rather than creating another one and consuming Apple's limited distribution-certificate slots.
+The workflow's built-in GITHUB_TOKEN cannot write repository secrets. GH_SECRETS_TOKEN is a separate, least-privilege credential used only during the first run to save the generated signing identity. Once both APPLE_AUTO_SIGNING_P12_BASE64 and APPLE_AUTO_SIGNING_P12_PASSWORD have been created, you can delete GH_SECRETS_TOKEN from repository secrets and revoke the fine-grained token. Subsequent runs reuse the saved certificate rather than creating another one and consuming Apple's limited distribution-certificate slots.
 
 Create the GitHub token at https://github.com/settings/personal-access-tokens/new. Choose **Fine-grained token**, select only the tling0001/chromium-ipa repository, and grant **Secrets: Read and write**. Add the token as GH_SECRETS_TOKEN. Do not paste it into chat or commit it.
 
