@@ -1,0 +1,141 @@
+name: Sign Chromium iOS IPA
+on:
+  workflow_dispatch:
+    inputs:
+      source_mode:
+        description: Where to get the unsigned IPA
+        required: true
+        type: choice
+        default: latest_successful
+        options: [latest_successful, run_id, url]
+      variant:
+        description: Build variant
+        required: true
+        type: choice
+        default: webkit
+        options: [webkit, blink]
+      run_id:
+        description: Build workflow run ID (only for source_mode=run_id)
+        required: false
+        type: string
+      ipa_url:
+        description: Direct HTTPS URL to an unsigned IPA (only for source_mode=url)
+        required: false
+        type: string
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: sign-chromium-ios
+  cancel-in-progress: false
+jobs:
+  sign:
+    name: Sign ${{ inputs.variant }} IPA
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SOURCE_MODE: ${{ inputs.source_mode }}
+      VARIANT: ${{ inputs.variant }}
+      INPUT_RUN_ID: ${{ inputs.run_id }}
+      IPA_URL: ${{ inputs.ipa_url }}
+      APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILES_ZIP_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILES_ZIP_BASE64 }}
+    steps:
+      - name: Check out signing helper
+        uses: actions/checkout@v4
+      - name: Validate signing secrets and inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$APPLE_CERTIFICATE_P12_BASE64" ]] || { echo "::error::Missing secret APPLE_CERTIFICATE_P12_BASE64"; exit 1; }
+          [[ -n "$APPLE_CERTIFICATE_PASSWORD" ]] || { echo "::error::Missing secret APPLE_CERTIFICATE_PASSWORD"; exit 1; }
+          [[ -n "$IOS_PROVISIONING_PROFILES_ZIP_BASE64" ]] || { echo "::error::Missing secret IOS_PROVISIONING_PROFILES_ZIP_BASE64"; exit 1; }
+          if [[ "$SOURCE_MODE" == "run_id" && ! "$INPUT_RUN_ID" =~ ^[0-9]+$ ]]; then echo "::error::Enter a numeric build run ID."; exit 1; fi
+          if [[ "$SOURCE_MODE" == "url" && ! "$IPA_URL" =~ ^https:// ]]; then echo "::error::ipa_url must be HTTPS."; exit 1; fi
+      - name: Resolve source build
+        id: source
+        if: ${{ inputs.source_mode != 'url' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="chromium-ios-$VARIANT-unsigned"
+          if [[ "$SOURCE_MODE" == "run_id" ]]; then
+            candidate_ids="$INPUT_RUN_ID"
+          else
+            candidate_ids="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/build-ios.yml/runs?status=success&per_page=100" --jq '.workflow_runs[] | select(.conclusion == "success") | .id')"
+          fi
+          selected=""
+          while IFS= read -r id; do
+            [[ -n "$id" ]] || continue
+            artifact_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" --jq ".artifacts[] | select(.name == \"$artifact\" and .expired == false) | .id" | head -n 1)"
+            if [[ -n "$artifact_id" ]]; then selected="$id"; break; fi
+          done <<< "$candidate_ids"
+          [[ -n "$selected" ]] || { echo "::error::No successful build has an unexpired $artifact artifact."; exit 1; }
+          echo "run_id=$selected" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact" >> "$GITHUB_OUTPUT"
+          echo "Using build run $selected ($artifact)"
+      - name: Download selected build artifact
+        if: ${{ inputs.source_mode != 'url' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.source.outputs.artifact_name }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: source-artifact
+      - name: Download IPA from URL
+        if: ${{ inputs.source_mode == 'url' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source-artifact
+          curl --fail --location --retry 3 --retry-all-errors --output source-artifact/input.ipa "$IPA_URL"
+          file source-artifact/input.ipa | grep -qi 'zip archive' || { echo "::error::URL did not return an IPA/ZIP."; exit 1; }
+      - name: Prepare signing identity and profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p signing
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > signing/certificate.p12
+          printf '%s' "$IOS_PROVISIONING_PROFILES_ZIP_BASE64" | base64 --decode > signing/profiles.zip
+          unzip -q signing/profiles.zip -d signing/profiles
+          KEYCHAIN_PATH="$RUNNER_TEMP/chromium-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import signing/certificate.p12 -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk '/[0-9A-F]{40}/ {print $2; exit}')"
+          [[ -n "$IDENTITY" ]] || { echo "::error::No valid iOS code-signing identity in P12."; exit 1; }
+          echo "SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+      - name: Locate and sign app
+        shell: bash
+        run: |
+          set -euo pipefail
+          IPA="$(find source-artifact -type f -name '*.ipa' -print -quit)"
+          [[ -n "$IPA" ]] || { echo "::error::No .ipa found in source artifact."; find source-artifact -type f; exit 1; }
+          mkdir -p work/unpacked
+          ditto -x -k "$IPA" work/unpacked
+          APP="$(find work/unpacked/Payload -maxdepth 1 -type d -name '*.app' -print -quit)"
+          [[ -n "$APP" ]] || { echo "::error::IPA does not contain Payload/*.app."; exit 1; }
+          python3 scripts/sign_ios_ipa.py "$APP" signing/profiles "$SIGNING_IDENTITY"
+          mkdir -p output
+          ditto -c -k --sequesterRsrc --keepParent work/unpacked/Payload "output/Chromium-iOS-$VARIANT-signed.ipa"
+          shasum -a 256 output/*.ipa
+      - name: Upload signed IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: chromium-ios-${{ inputs.variant }}-signed
+          path: output/*.ipa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Clean up signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -rf signing work source-artifact
+          security delete-keychain "$RUNNER_TEMP/chromium-signing.keychain-db" 2>/dev/null || true
