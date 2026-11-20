@@ -25,4 +25,4 @@ jobs:
       - name: Compile Python helpers
         run: python -m py_compile scripts/apple_sign_ipa.py scripts/apple_devices.py
       - name: Validate GitHub Actions workflow syntax
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@latest
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@latest -ignore 'label "xcode-27" is unknown'
