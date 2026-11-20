@@ -76,6 +76,19 @@ class Apple:
         print("Created IOS_DISTRIBUTION certificate:",x["attributes"].get("serialNumber",""))
         return p12,password
     def profile(self,name,bid_id,cert_id,device_ids,path):
+        # Replace only an existing profile with this exact generated name
+        # and App ID. This avoids Apple's HTTP 409 duplicate-name response
+        # while ensuring the replacement includes the current cert/devices.
+        for existing in self.pages("/profiles?filter[profileType]=IOS_APP_ADHOC&limit=200"):
+            if existing.get("attributes",{}).get("name") != name[:100]:
+                continue
+            pid=existing["id"]
+            detail=self.req("GET",f"/profiles/{pid}?include=bundleId")
+            rel=detail.get("data",{}).get("relationships",{}).get("bundleId",{}).get("data",{})
+            if rel.get("id") != bid_id:
+                continue
+            print(f"Deleting duplicate Ad Hoc profile {pid} for {name}; it will be regenerated.")
+            self.req("DELETE",f"/profiles/{pid}")
         body={"data":{"type":"profiles","attributes":{"name":name[:100],"profileType":"IOS_APP_ADHOC"},"relationships":{
             "bundleId":{"data":{"type":"bundleIds","id":bid_id}},
             "certificates":{"data":[{"type":"certificates","id":cert_id}]},
