@@ -60,7 +60,9 @@ class Apple:
         self.req("POST","/bundleIdCapabilities",json={"data":{"type":"bundleIdCapabilities","attributes":{"capabilityType":capability},"relationships":{"bundleId":{"data":{"type":"bundleIds","id":bundle_id_id}}}}})
         print(f"Enabled capability: {capability}")
     def certs(self):
-        return self.pages("/certificates?filter[certificateType]=IOS_DISTRIBUTION&limit=200&fields[certificates]=certificateType,serialNumber,activated,expirationDate")
+        # Do not request/require the undocumented "activated" field: the
+        # Certificates API may omit it even for a valid current certificate.
+        return self.pages("/certificates?filter[certificateType]=IOS_DISTRIBUTION&limit=200&fields[certificates]=certificateType,serialNumber,expirationDate")
     def create_cert(self,work):
         key=work/"dist.key"; csr=work/"dist.csr"
         run("openssl","genrsa","-out",str(key),"2048")
@@ -107,14 +109,18 @@ def signing_cert(apple,work):
         serial=cert_serial(p12,pw,work)
         for c in apple.certs():
             a=c.get("attributes",{}); s=(a.get("serialNumber") or "").replace(":","").lstrip("0").upper() or "0"
-            if s==serial and a.get("activated") is True:
-                print("Reusing saved Apple distribution certificate."); return p12,pw,c["id"]
-        print("Saved certificate is not active in Apple; creating a replacement.")
+            # Missing "activated" is not evidence of revocation. Only reject
+            # an explicit false value; Apple exposes expiration separately.
+            if s==serial and a.get("activated") is not False:
+                print("Reusing saved Apple distribution certificate:", c["id"])
+                return p12,pw,c["id"]
+        print("Saved certificate was not found in Apple's current certificate list; checking before requesting another.")
     p12,pw=apple.create_cert(work); serial=cert_serial(p12,pw,work); found=None
     for c in apple.certs():
         a=c.get("attributes",{}); s=(a.get("serialNumber") or "").replace(":","").lstrip("0").upper() or "0"
         if s==serial: found=c; break
-    if not found: raise RuntimeError("New Apple certificate was not returned by certificate listing.")
+    if not found:
+        raise RuntimeError("New Apple certificate was created but is not yet visible in the API. Retry signing; the saved P12 will be reused once Apple lists it.")
     gh_secret(P12_SECRET,base64.b64encode(p12.read_bytes()).decode())
     gh_secret(PASS_SECRET,pw)
     return p12,pw,found["id"]
