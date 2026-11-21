@@ -28,7 +28,9 @@ Create the GitHub token at https://github.com/settings/personal-access-tokens/ne
 
 The build now uses the account-specific prefix com.tling0001 instead of Google's org.chromium prefix. This avoids attempting to register Chromium's original Google-owned identifiers under your Apple team.
 
-The signing workflow automatically registers the app and extension Bundle IDs, enables the App Groups capability, and enables AutoFill Credential Provider for the main app and Credential Provider extension.
+The signing workflow automatically appends `.tling` to every app and extension Bundle ID in the IPA before registering those explicit identifiers with App Store Connect. It updates each bundle's `Info.plist` and then signs using the matching suffixed identifiers. For example, `com.tling0001.chrome.ios.dev` becomes `com.tling0001.chrome.ios.dev.tling`. It then enables the App Groups capability, and enables AutoFill Credential Provider for the main app and Credential Provider extension.
+
+The separate **Publish IPA as Ad Hoc Release** workflow accepts a direct HTTPS IPA URL, rewrites and signs the app using the same Apple signing setup, then creates a GitHub release. The release title and IPA asset name use `<bundle-id> - <app-version>`; it also uploads `manifest.plist` and places an `itms-services://` installation link in the release description. This workflow expects the same Apple API and signing secrets described above.
 
 **One Apple Developer portal step remains for App Groups:** Apple's public App Store Connect API can turn on APP_GROUPS but does not expose the App Group container registration and assignment operations. After the first signing run creates the Bundle IDs, open Certificates, Identifiers & Profiles:
 
