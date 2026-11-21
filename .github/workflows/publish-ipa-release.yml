@@ -1,0 +1,145 @@
+name: Publish IPA as Ad Hoc Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: Direct HTTPS URL to an IPA (preferably already Ad Hoc signed)
+        required: true
+        type: string
+      prerelease:
+        description: Mark this release as a prerelease
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-ipa-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish IPA and OTA manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      IPA_URL: ${{ inputs.ipa_url }}
+    steps:
+      - name: Validate URL and download IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$IPA_URL" =~ ^https:// ]] || { echo "::error::ipa_url must be an HTTPS URL."; exit 1; }
+          mkdir -p release
+          curl --fail --location --retry 3 --retry-all-errors --max-time 900 \
+            --output release/input.ipa "$IPA_URL"
+          python - <<'PY'
+          import zipfile
+          p = "release/input.ipa"
+          if not zipfile.is_zipfile(p):
+              raise SystemExit("The supplied URL did not return a valid IPA/ZIP archive.")
+          with zipfile.ZipFile(p) as z:
+              apps = [n for n in z.namelist() if n.startswith("Payload/") and n.endswith(".app/Info.plist")]
+              if not apps:
+                  raise SystemExit("The IPA contains no Payload/*.app/Info.plist.")
+          PY
+
+      - name: Read app metadata and create OTA manifest
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, plistlib, urllib.parse, zipfile
+          from pathlib import PurePosixPath
+
+          ipa = "release/input.ipa"
+          with zipfile.ZipFile(ipa) as z:
+              app_plists = [
+                  n for n in z.namelist()
+                  if n.startswith("Payload/") and n.endswith(".app/Info.plist")
+                  and n.count("/") == 2
+              ]
+              if len(app_plists) != 1:
+                  raise SystemExit(f"Expected exactly one top-level app Info.plist; found {len(app_plists)}.")
+              info = plistlib.loads(z.read(app_plists[0]))
+
+          bundle_id = info.get("CFBundleIdentifier", "").strip()
+          version = str(info.get("CFBundleShortVersionString") or info.get("CFBundleVersion") or "").strip()
+          if not bundle_id or not version:
+              raise SystemExit("The IPA is missing CFBundleIdentifier or app version metadata.")
+          if not bundle_id.endswith(".tling"):
+              raise SystemExit(
+                  f"Bundle ID '{bundle_id}' does not end in .tling. "
+                  "Run the updated Sign Chromium iOS IPA workflow first so the app is rewritten and signed."
+              )
+
+          release_name = f"{bundle_id} - {version}"
+          ipa_name = f"{release_name}.ipa"
+          with open(ipa, "rb") as src, open("release/" + ipa_name, "wb") as dst:
+              dst.write(src.read())
+
+          tag = f"adhoc-{os.environ['GITHUB_RUN_NUMBER']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+          repo = os.environ["GITHUB_REPOSITORY"]
+          ipa_url = f"https://github.com/{repo}/releases/download/{tag}/{urllib.parse.quote(ipa_name)}"
+          manifest = {
+              "items": [{
+                  "assets": [{
+                      "kind": "software-package",
+                      "url": ipa_url
+                  }],
+                  "metadata": {
+                      "bundle-identifier": bundle_id,
+                      "bundle-version": version,
+                      "kind": "software",
+                      "title": info.get("CFBundleDisplayName") or info.get("CFBundleName") or bundle_id
+                  }
+              }]
+          }
+          with open("release/manifest.plist", "wb") as f:
+              plistlib.dump(manifest, f, fmt=plistlib.FMT_XML, sort_keys=False)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"bundle_id={bundle_id}\n")
+              f.write(f"version={version}\n")
+              f.write(f"release_name={release_name}\n")
+              f.write(f"ipa_name={ipa_name}\n")
+              f.write(f"tag={tag}\n")
+              f.write(f"manifest_url=https://github.com/{repo}/releases/download/{tag}/manifest.plist\n")
+          PY
+
+      - name: Create GitHub release and upload IPA + manifest
+        shell: bash
+        env:
+          RELEASE_NAME: ${{ steps.metadata.outputs.release_name }}
+          IPA_NAME: ${{ steps.metadata.outputs.ipa_name }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+          MANIFEST_URL: ${{ steps.metadata.outputs.manifest_url }}
+          BUNDLE_ID: ${{ steps.metadata.outputs.bundle_id }}
+          APP_VERSION: ${{ steps.metadata.outputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          INSTALL_URL="itms-services://?action=download-manifest&url=$MANIFEST_URL"
+          NOTES=$(cat <<EOF
+          ## Ad Hoc installation
+
+          [Install $RELEASE_NAME]($INSTALL_URL)
+
+          **Bundle ID:** `$BUNDLE_ID`  
+          **App version:** `$APP_VERSION`
+
+          The release includes the Ad Hoc IPA (`$IPA_NAME`) and the OTA installation manifest (`manifest.plist`).
+          EOF
+          )
+          args=("$TAG" "release/$IPA_NAME#$IPA_NAME" "release/manifest.plist#manifest.plist"
+                --title "$RELEASE_NAME" --notes "$NOTES")
+          if [[ "$PRERELEASE" == "true" ]]; then args+=(--prerelease); fi
+          gh release create "${args[@]}"
+
+      - name: Show published release
+        run: gh release view "${{ steps.metadata.outputs.tag }}" --json name,url,assets
