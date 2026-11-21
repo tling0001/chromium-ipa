@@ -189,21 +189,11 @@ def main():
     bundles=[p for p in root.rglob("*") if p.is_dir() and p.suffix in (".app",".appex")]+[root]
     bundles=sorted(set(bundles),key=lambda p:len(p.parts),reverse=True)
 
-    # Older release IPAs retain upstream identifiers that this developer
-    # team cannot register. Reject them before creating profiles/certificates.
-    expected_prefix=env("IOS_APP_BUNDLE_ID_PREFIX","com.tling0001").rstrip(".")+"."
+    # The .tling suffix creates team-specific explicit identifiers even when
+    # the source IPA uses upstream Chromium bundle IDs.
     identifiers=[bid(bundle) for bundle in bundles]
-    foreign=sorted({identifier for identifier in identifiers if not identifier.startswith(expected_prefix)})
-    if foreign:
-        sample="\n  - ".join(foreign[:20])
-        more=f"\n  ... and {len(foreign)-20} more" if len(foreign)>20 else ""
-        raise RuntimeError(
-            f"This IPA uses bundle IDs outside your team-owned '{expected_prefix[:-1]}' prefix. "
-            "Apple rejects registering upstream Google/Chromium IDs. Do not use the old "
-            "GitHub release IPA; rerun with source_mode=latest_successful, or select a "
-            "successful iOS build created after the com.tling0001 bundle-ID change. "
-            "Detected IDs:\n  - " + sample + more
-        )
+    if len(set(identifiers)) != len(identifiers):
+        raise RuntimeError("The source IPA contains duplicate app/extension bundle identifiers.")
 
     # Give every app/extension a team-specific suffix before registering
     # App IDs with Apple. The on-disk Info.plist identifiers must match the
