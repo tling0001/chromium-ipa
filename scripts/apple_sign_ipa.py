@@ -205,7 +205,30 @@ def main():
             "Detected IDs:\n  - " + sample + more
         )
 
-    # Provisioning starts only after the IPA's IDs pass the ownership check.
+    # Give every app/extension a team-specific suffix before registering
+    # App IDs with Apple. The on-disk Info.plist identifiers must match the
+    # identifiers used for provisioning and the final code signature.
+    rewritten={}
+    for bundle in bundles:
+        info=bundle/"Info.plist"
+        metadata=plistlib.loads(info.read_bytes())
+        original=metadata.get("CFBundleIdentifier")
+        if not original:
+            raise RuntimeError("Missing CFBundleIdentifier: "+str(bundle))
+        updated=original if original.endswith(".tling") else original+".tling"
+        if updated in rewritten.values():
+            raise RuntimeError("Bundle ID suffixing produced a duplicate identifier: "+updated)
+        metadata["CFBundleIdentifier"]=updated
+        info.write_bytes(plistlib.dumps(metadata,fmt=plistlib.FMT_XML,sort_keys=True))
+        rewritten[original]=updated
+        print(f"Rewrote bundle identifier: {original} -> {updated}")
+
+    identifiers=[bid(bundle) for bundle in bundles]
+    if any(not identifier.endswith(".tling") for identifier in identifiers):
+        raise RuntimeError("Internal error: not all bundle identifiers end in .tling.")
+
+    # Provisioning starts only after the IPA's IDs pass the ownership check
+    # and all bundle identifiers have been rewritten.
     p12,pw,cert_id=signing_cert(apple,work)
 
     # Import only after signing_cert has returned a real P12 and password.
