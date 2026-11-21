@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ipa_url:
-        description: Direct HTTPS URL to an IPA (preferably already Ad Hoc signed)
+        description: Direct HTTPS URL to an IPA to re-identify, Ad Hoc sign, and release
         required: true
         type: string
       prerelease:
@@ -22,13 +22,16 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish IPA and OTA manifest
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: Sign and publish supplied IPA
+    runs-on: macos-15
+    timeout-minutes: 45
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       IPA_URL: ${{ inputs.ipa_url }}
     steps:
+      - name: Check out signing helper
+        uses: actions/checkout@v4
+
       - name: Validate URL and download IPA
         shell: bash
         run: |
@@ -37,27 +40,41 @@ jobs:
           mkdir -p release
           curl --fail --location --retry 3 --retry-all-errors --max-time 900 \
             --output release/input.ipa "$IPA_URL"
-          python - <<'PY'
-          import zipfile
-          p = "release/input.ipa"
-          if not zipfile.is_zipfile(p):
-              raise SystemExit("The supplied URL did not return a valid IPA/ZIP archive.")
-          with zipfile.ZipFile(p) as z:
-              apps = [n for n in z.namelist() if n.startswith("Payload/") and n.endswith(".app/Info.plist")]
-              if not apps:
-                  raise SystemExit("The IPA contains no Payload/*.app/Info.plist.")
-          PY
+          file release/input.ipa | grep -qi 'zip archive' || {
+            echo "::error::The supplied URL did not return a valid IPA/ZIP archive."
+            exit 1
+          }
 
-      - name: Read app metadata and create OTA manifest
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install signing dependencies
+        run: python -m pip install --disable-pip-version-check 'PyJWT[crypto]' requests pynacl
+
+      - name: Rewrite bundle IDs, register App IDs, and Ad Hoc sign
+        shell: bash
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_AUTO_SIGNING_P12_BASE64: ${{ secrets.APPLE_AUTO_SIGNING_P12_BASE64 }}
+          APPLE_AUTO_SIGNING_P12_PASSWORD: ${{ secrets.APPLE_AUTO_SIGNING_P12_PASSWORD }}
+          GH_SECRETS_TOKEN: ${{ secrets.GH_SECRETS_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/apple_sign_ipa.py release/input.ipa release/signed.ipa
+
+      - name: Read signed app metadata and create OTA manifest
         id: metadata
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import os, plistlib, urllib.parse, zipfile
-          from pathlib import PurePosixPath
 
-          ipa = "release/input.ipa"
+          ipa = "release/signed.ipa"
           with zipfile.ZipFile(ipa) as z:
               app_plists = [
                   n for n in z.namelist()
@@ -71,12 +88,9 @@ jobs:
           bundle_id = info.get("CFBundleIdentifier", "").strip()
           version = str(info.get("CFBundleShortVersionString") or info.get("CFBundleVersion") or "").strip()
           if not bundle_id or not version:
-              raise SystemExit("The IPA is missing CFBundleIdentifier or app version metadata.")
+              raise SystemExit("The signed IPA is missing CFBundleIdentifier or app version metadata.")
           if not bundle_id.endswith(".tling"):
-              raise SystemExit(
-                  f"Bundle ID '{bundle_id}' does not end in .tling. "
-                  "Run the updated Sign Chromium iOS IPA workflow first so the app is rewritten and signed."
-              )
+              raise SystemExit(f"Bundle ID '{bundle_id}' does not end in .tling after signing.")
 
           release_name = f"{bundle_id} - {version}"
           ipa_name = f"{release_name}.ipa"
@@ -85,13 +99,10 @@ jobs:
 
           tag = f"adhoc-{os.environ['GITHUB_RUN_NUMBER']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
           repo = os.environ["GITHUB_REPOSITORY"]
-          ipa_url = f"https://github.com/{repo}/releases/download/{tag}/{urllib.parse.quote(ipa_name)}"
+          ipa_asset_url = f"https://github.com/{repo}/releases/download/{tag}/{urllib.parse.quote(ipa_name)}"
           manifest = {
               "items": [{
-                  "assets": [{
-                      "kind": "software-package",
-                      "url": ipa_url
-                  }],
+                  "assets": [{"kind": "software-package", "url": ipa_asset_url}],
                   "metadata": {
                       "bundle-identifier": bundle_id,
                       "bundle-version": version,
@@ -133,7 +144,7 @@ jobs:
           **Bundle ID:** `$BUNDLE_ID`  
           **App version:** `$APP_VERSION`
 
-          The release includes the Ad Hoc IPA (`$IPA_NAME`) and the OTA installation manifest (`manifest.plist`).
+          The release includes the Ad Hoc IPA (`$IPA_NAME`) and OTA installation manifest (`manifest.plist`).
           EOF
           )
           args=("$TAG" "release/$IPA_NAME#$IPA_NAME" "release/manifest.plist#manifest.plist"
@@ -143,3 +154,10 @@ jobs:
 
       - name: Show published release
         run: gh release view "${{ steps.metadata.outputs.tag }}" --json name,url,assets
+
+      - name: Clean up signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -rf apple-signing-work work release
+          security delete-keychain "$RUNNER_TEMP/chromium-auto-sign.keychain-db" 2>/dev/null || true
