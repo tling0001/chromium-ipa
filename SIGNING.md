@@ -28,7 +28,7 @@ Create the GitHub token at https://github.com/settings/personal-access-tokens/ne
 
 The build now uses the account-specific prefix com.tling0001 instead of Google's org.chromium prefix. This avoids attempting to register Chromium's original Google-owned identifiers under your Apple team.
 
-The signing workflow automatically appends `.tling` to every app and extension Bundle ID in the IPA before registering those explicit identifiers with App Store Connect. It updates each bundle's `Info.plist` and then signs using the matching suffixed identifiers. For example, `com.tling0001.chrome.ios.dev` becomes `com.tling0001.chrome.ios.dev.tling`. It then enables the App Groups capability, and enables AutoFill Credential Provider for the main app and Credential Provider extension.
+The signing workflow automatically appends `.tling` to every app and extension Bundle ID in the IPA before registering those explicit identifiers with App Store Connect. It updates each bundle's `Info.plist` and then signs using the matching suffixed identifiers. For example, `com.tling0001.chrome.ios.dev` becomes `com.tling0001.chrome.ios.dev.tling`. It then enables the App Groups capability, and enables AutoFill Credential Provider for the main app and Credential Provider extension. Reprocessing an IPA that already has one or more trailing `.tling` suffixes now normalizes the main app ID to exactly one suffix and rewrites embedded app/extension IDs under that normalized namespace.
 
 The separate **Publish IPA as Ad Hoc Release** workflow accepts a direct HTTPS IPA URL, rewrites and signs the app using the same Apple signing setup, then creates a GitHub release. The release title and IPA asset name use `<bundle-id> - <app-version>`; it also uploads `manifest.plist` and places an `itms-services://` installation link in the release description. This workflow expects the same Apple API and signing secrets described above.
 
@@ -48,9 +48,13 @@ Apple documents App Groups and the required assignment process here: https://dev
 2. Click **Run workflow**.
 3. Choose WebKit or Blink and select the latest successful build, a run ID, or a direct IPA URL.
 4. The workflow automatically lists every ENABLED iOS device registered to your Apple Developer team. It does not need a UDID input for devices already registered.
-5. It creates or reuses the Apple distribution certificate, registers explicit App IDs for the app and embedded app extensions, creates Ad Hoc profiles containing all enabled registered devices, signs nested code and app bundles, verifies signatures, and uploads the signed IPA artifact.
+5. It creates or reuses the Apple distribution certificate, registers explicit App IDs for the app and embedded app extensions, creates Ad Hoc profiles containing all enabled registered devices, signs nested code and app bundles, verifies signatures, and uploads the signed IPA artifact. The signer identifies Mach-O binaries using the macOS `file` utility rather than filename extensions, so extensionless Gecko binaries such as `Frameworks/XUL` are included. It signs Mach-O files first, then framework bundles, then provisioned app/extension bundles, and verifies nested code plus the final app seal.
 
 You do not need to run **Register Apple Devices for Chromium** if your devices are already registered. That separate workflow is optional for registering additional devices or inspecting the device list.
+
+## Publishing workflow safety
+
+The **Publish IPA as Ad Hoc Release** workflow is manual-only. It requires an explicit HTTPS IPA URL and no longer runs automatically when the signing script or workflow changes. This prevents a code change from unintentionally re-signing and publishing the workflow's former default input IPA.
 
 ## Important entitlement limitation
 
