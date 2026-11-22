@@ -144,6 +144,13 @@ def bid(bundle):
     if not x: raise RuntimeError("Missing CFBundleIdentifier: "+str(bundle))
     return x
 
+def is_macho(path):
+    """Identify Mach-O code by its file type, not by its filename extension."""
+    if path.is_symlink() or not path.is_file():
+        return False
+    description=run("file","-b",str(path),capture=True)
+    return "Mach-O" in description
+
 def profile_plist(path,work):
     raw=run("security","cms","-D","-i",str(path),capture=True)
     return plistlib.loads(raw.encode())
@@ -231,7 +238,15 @@ def main():
     root_original=root_info.get("CFBundleIdentifier")
     if not root_original:
         raise RuntimeError("Main app is missing CFBundleIdentifier.")
-    root_updated=root_original if root_original.endswith(".tling") else root_original+".tling"
+    # Normalize any number of previously appended suffixes to exactly one.
+    # This makes re-signing an already processed IPA idempotent and repairs
+    # artifacts produced by older runs that appended the namespace repeatedly.
+    root_base=re.sub(r"(?:\\.tling)+$", "", root_original)
+    if not root_base:
+        raise RuntimeError(f"Cannot derive a valid base bundle identifier from {root_original!r}.")
+    root_updated=root_base+".tling"
+    if root_updated != root_original:
+        print(f"Normalized main app bundle identifier: {root_original} -> {root_updated}")
     rewritten={}
     for bundle in bundles:
         info=bundle/"Info.plist"
@@ -310,21 +325,43 @@ def main():
         profile=profile_dir/filename
         data=apple.profile("Chromium Ad Hoc "+identifier,app_id,cert_id,[d["id"] for d in enabled],profile)
         print(f"Created Ad Hoc profile for {identifier} ({data.get('id')}).")
-    # Sign nested Mach-O code before extensions and the main application.
-    code=[]
-    for p in root.rglob("*"):
-        if (p.is_dir() and p.suffix==".framework") or (p.is_file() and p.suffix==".dylib"): code.append(p)
-    for p in sorted(code,key=lambda x:len(x.parts),reverse=True):
+    # Sign every actual Mach-O executable/library before signing containing
+    # frameworks, extensions, and the main app. Gecko ships bare Mach-O files
+    # such as Frameworks/XUL which have no .dylib or .framework suffix; an
+    # extension-based scan silently skipped them and caused dyld to reject XUL.
+    macho_files=[p for p in root.rglob("*") if is_macho(p)]
+    if not macho_files:
+        raise RuntimeError("No Mach-O code was found inside the app; refusing to emit an unsigned IPA.")
+    print(f"Found {len(macho_files)} Mach-O code file(s) by file type.")
+    for p in sorted(macho_files,key=lambda x:len(x.parts),reverse=True):
         run("codesign","--force","--sign",identity,"--timestamp=none",str(p))
+        print("Signed Mach-O:",p.relative_to(root))
+
+    # Frameworks are bundles, so sign them after their inner Mach-O files.
+    frameworks=sorted(
+        (p for p in root.rglob("*.framework") if p.is_dir()),
+        key=lambda x:len(x.parts),reverse=True
+    )
+    for framework in frameworks:
+        run("codesign","--force","--sign",identity,"--timestamp=none",str(framework))
+        run("codesign","--verify","--strict","--verbose=2",str(framework))
+
+    # Provisioned .appex/.app bundles are signed last, deepest first, with the
+    # exact entitlements authorized by their matching Ad Hoc profiles.
     for bundle in bundles:
         profile=profile_dir/(re.sub(r"[^A-Za-z0-9_.-]","_",bid(bundle))+".mobileprovision")
         sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id)
+
+    # Verify each Mach-O independently after its containing bundles have been
+    # signed, then verify the complete app seal recursively.
+    for p in macho_files:
+        run("codesign","--verify","--strict","--verbose=2",str(p))
     run("codesign","--verify","--deep","--strict","--verbose=2",str(root))
     out.parent.mkdir(parents=True,exist_ok=True)
     if out.exists(): out.unlink()
     run("ditto","-c","-k","--sequesterRsrc","--keepParent",str(payload),str(out))
     print(run("shasum","-a","256",str(out),capture=True).strip())
-    print(f"Ad Hoc IPA signed. {len(bundles)} app/extension bundle(s), {len(enabled)} registered enabled devices.")
+    print(f"Ad Hoc IPA signed and verified. {len(macho_files)} Mach-O file(s), {len(frameworks)} framework(s), {len(bundles)} app/extension bundle(s), {len(enabled)} registered enabled devices.")
     print("If App Group warnings appeared, register group.com.tling0001.chrome and group.com.tling0001.common in Certificates, Identifiers & Profiles, then assign both groups to every Chromium app/extension App ID before relying on cross-extension sharing.")
 
 if __name__=="__main__":
