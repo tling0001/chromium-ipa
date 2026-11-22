@@ -7,6 +7,7 @@ on:
       - "scripts/apple_sign_ipa.py"
       - "scripts/apple_devices.py"
       - ".github/workflows/sign-ios.yml"
+      - ".github/workflows/publish-ipa-release.yml"
       - ".github/workflows/apple-device-registration.yml"
       - ".github/workflows/validate-signing.yml"
       - ".github/actionlint.yaml"
