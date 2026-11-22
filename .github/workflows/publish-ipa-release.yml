@@ -97,8 +97,12 @@ jobs:
           with open(ipa, "rb") as src, open("release/" + ipa_name, "wb") as dst:
               dst.write(src.read())
 
-          tag = f"adhoc-{os.environ['GITHUB_RUN_NUMBER']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+          # Git refs cannot contain spaces, so use the exact release-name
+          # components with the separator normalized to a hyphen.
+          tag = f"{bundle_id}-{version}"
           repo = os.environ["GITHUB_REPOSITORY"]
+          manifest_url = f"https://github.com/{repo}/releases/download/{tag}/manifest.plist"
+          install_url = f"itms-services://?action=download-manifest&url={manifest_url}"
           ipa_asset_url = f"https://github.com/{repo}/releases/download/{tag}/{urllib.parse.quote(ipa_name)}"
           manifest = {
               "items": [{
@@ -114,13 +118,30 @@ jobs:
           with open("release/manifest.plist", "wb") as f:
               plistlib.dump(manifest, f, fmt=plistlib.FMT_XML, sort_keys=False)
 
+          # Keep the custom-scheme URL visibly copyable in GitHub's Markdown
+          # renderer, which may suppress non-HTTP hrefs in rendered links.
+          notes = f"""## Ad Hoc installation
+
+          **Install on iPhone or iPad**
+
+          `{install_url}`
+
+          [Open the OTA manifest](${manifest_url})
+
+          **Bundle ID:** `{bundle_id}`
+          **App version:** `{version}`
+
+          Assets: `{ipa_name}` and `manifest.plist`.
+          """
+          with open("release/release-notes.md", "w", encoding="utf-8") as f:
+              f.write(notes)
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"bundle_id={bundle_id}\n")
               f.write(f"version={version}\n")
               f.write(f"release_name={release_name}\n")
               f.write(f"ipa_name={ipa_name}\n")
               f.write(f"tag={tag}\n")
-              f.write(f"manifest_url=https://github.com/{repo}/releases/download/{tag}/manifest.plist\n")
           PY
 
       - name: Create GitHub release and upload IPA + manifest
@@ -129,26 +150,11 @@ jobs:
           RELEASE_NAME: ${{ steps.metadata.outputs.release_name }}
           IPA_NAME: ${{ steps.metadata.outputs.ipa_name }}
           TAG: ${{ steps.metadata.outputs.tag }}
-          MANIFEST_URL: ${{ steps.metadata.outputs.manifest_url }}
-          BUNDLE_ID: ${{ steps.metadata.outputs.bundle_id }}
-          APP_VERSION: ${{ steps.metadata.outputs.version }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
-          INSTALL_URL="itms-services://?action=download-manifest&url=$MANIFEST_URL"
-          NOTES=$(cat <<EOF
-          ## Ad Hoc installation
-
-          [Install $RELEASE_NAME]($INSTALL_URL)
-
-          **Bundle ID:** `$BUNDLE_ID`  
-          **App version:** `$APP_VERSION`
-
-          The release includes the Ad Hoc IPA (`$IPA_NAME`) and OTA installation manifest (`manifest.plist`).
-          EOF
-          )
           args=("$TAG" "release/$IPA_NAME#$IPA_NAME" "release/manifest.plist#manifest.plist"
-                --title "$RELEASE_NAME" --notes "$NOTES")
+                --title "$RELEASE_NAME" --notes-file release/release-notes.md)
           if [[ "$PRERELEASE" == "true" ]]; then args+=(--prerelease); fi
           gh release create "${args[@]}"
 
