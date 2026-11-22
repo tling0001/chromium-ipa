@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ipa_url:
-        description: Direct HTTPS URL to an IPA to re-identify, Ad Hoc sign, and release
+        description: Direct HTTPS URL to an IPA to re-identify, sign using the selected mode, and release
         required: true
         type: string
       prerelease:
@@ -13,11 +13,11 @@ on:
         default: true
         type: boolean
       signing_mode:
-        description: Development signing is recommended for apps that reject distribution-certificate signing
+        description: Use Development for Reynard and other apps that reject Distribution signing
         required: true
         type: choice
-        default: adhoc
-        options: [adhoc, development]
+        default: development
+        options: [development, adhoc]
 
 permissions:
   contents: write
@@ -129,17 +129,25 @@ jobs:
 
           # Keep the custom-scheme URL visibly copyable in GitHub's Markdown
           # renderer, which may suppress non-HTTP hrefs in rendered links.
-          notes = f"""## iOS installation
+          signing_mode = os.environ.get("SIGNING_MODE", "development").lower()
+          if signing_mode == "development":
+              install_instructions = f"""**Install on iPhone or iPad**
 
-          **Install on iPhone or iPad**
+          Download `{ipa_name}` from this release and install it using AltStore or SideStore.
+          In AltStore/SideStore, enable **Keep App Extensions** for Reynard."""
+          else:
+              install_instructions = f"""**Install on iPhone or iPad**
 
           `{install_url}`
 
-          [Open the OTA manifest]({manifest_url})
+          [Open the OTA manifest]({manifest_url})"""
+          notes = f"""## iOS installation
+
+          {install_instructions}
 
           **Bundle ID:** `{bundle_id}`
           **App version:** `{version}`
-          **Signing mode:** `{os.environ.get("SIGNING_MODE", "adhoc")}`
+          **Signing mode:** `{signing_mode}`
 
           Assets: `{ipa_name}` and `manifest.plist`.
           """
