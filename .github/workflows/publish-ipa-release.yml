@@ -166,7 +166,7 @@ jobs:
           curl --fail --location --retry 3 --retry-all-errors --max-time 120 \
             --output release/verified-manifest.plist "$MANIFEST_URL"
           python - <<'PY'
-          import plistlib
+          import os, plistlib
           with open("release/verified-manifest.plist", "rb") as f:
               manifest = plistlib.load(f)
           items = manifest.get("items") or []
@@ -178,7 +178,7 @@ jobs:
               raise SystemExit("OTA manifest has no single valid HTTPS software-package URL.")
           if not items[0].get("metadata", {}).get("bundle-identifier") or not items[0].get("metadata", {}).get("bundle-version"):
               raise SystemExit("OTA manifest is missing bundle identifier/version metadata.")
-          if package_urls[0] != "$IPA_ASSET_URL":
+          if package_urls[0] != os.environ["IPA_ASSET_URL"]:
               raise SystemExit("OTA manifest IPA URL does not match the uploaded IPA asset URL.")
           print("OTA manifest plist parsed and required metadata validated.")
           PY
