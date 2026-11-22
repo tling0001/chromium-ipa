@@ -241,7 +241,7 @@ def main():
     # Normalize any number of previously appended suffixes to exactly one.
     # This makes re-signing an already processed IPA idempotent and repairs
     # artifacts produced by older runs that appended the namespace repeatedly.
-    root_base=re.sub(r"(?:\\.tling)+$", "", root_original)
+    root_base=re.sub(r"(?:\.tling)+$", "", root_original)
     if not root_base:
         raise RuntimeError(f"Cannot derive a valid base bundle identifier from {root_original!r}.")
     root_updated=root_base+".tling"
