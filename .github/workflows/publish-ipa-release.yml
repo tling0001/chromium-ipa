@@ -89,8 +89,8 @@ jobs:
           version = str(info.get("CFBundleShortVersionString") or info.get("CFBundleVersion") or "").strip()
           if not bundle_id or not version:
               raise SystemExit("The signed IPA is missing CFBundleIdentifier or app version metadata.")
-          if not bundle_id.endswith(".tling"):
-              raise SystemExit(f"Bundle ID '{bundle_id}' does not end in .tling after signing.")
+          if not bundle_id.endswith(".tling") or bundle_id.removesuffix(".tling").endswith(".tling"):
+              raise SystemExit(f"Bundle ID '{bundle_id}' must end in exactly one .tling suffix after signing.")
 
           release_name = f"{bundle_id} - {version}"
           ipa_name = f"{bundle_id}-{version}.ipa"
