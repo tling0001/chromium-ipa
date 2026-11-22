@@ -93,7 +93,7 @@ jobs:
               raise SystemExit(f"Bundle ID '{bundle_id}' does not end in .tling after signing.")
 
           release_name = f"{bundle_id} - {version}"
-          ipa_name = f"{release_name}.ipa"
+          ipa_name = f"{bundle_id}-{version}.ipa"
           with open(ipa, "rb") as src, open("release/" + ipa_name, "wb") as dst:
               dst.write(src.read())
 
@@ -102,7 +102,7 @@ jobs:
           tag = f"{bundle_id}-{version}"
           repo = os.environ["GITHUB_REPOSITORY"]
           manifest_url = f"https://github.com/{repo}/releases/download/{tag}/manifest.plist"
-          install_url = f"itms-services://?action=download-manifest&url={manifest_url}"
+          install_url = f"itms-services://?action=download-manifest&url={urllib.parse.quote(manifest_url, safe='')}"
           ipa_asset_url = f"https://github.com/{repo}/releases/download/{tag}/{urllib.parse.quote(ipa_name)}"
           manifest = {
               "items": [{
@@ -126,7 +126,7 @@ jobs:
 
           `{install_url}`
 
-          [Open the OTA manifest](${manifest_url})
+          [Open the OTA manifest]({manifest_url})
 
           **Bundle ID:** `{bundle_id}`
           **App version:** `{version}`
@@ -142,6 +142,8 @@ jobs:
               f.write(f"release_name={release_name}\n")
               f.write(f"ipa_name={ipa_name}\n")
               f.write(f"tag={tag}\n")
+              f.write(f"manifest_url={manifest_url}\n")
+              f.write(f"ipa_asset_url={ipa_asset_url}\n")
           PY
 
       - name: Create GitHub release and upload IPA + manifest
@@ -151,12 +153,39 @@ jobs:
           IPA_NAME: ${{ steps.metadata.outputs.ipa_name }}
           TAG: ${{ steps.metadata.outputs.tag }}
           PRERELEASE: ${{ inputs.prerelease }}
+          MANIFEST_URL: ${{ steps.metadata.outputs.manifest_url }}
+          IPA_ASSET_URL: ${{ steps.metadata.outputs.ipa_asset_url }}
         run: |
           set -euo pipefail
           args=("$TAG" "release/$IPA_NAME#$IPA_NAME" "release/manifest.plist#manifest.plist"
                 --title "$RELEASE_NAME" --notes-file release/release-notes.md)
           if [[ "$PRERELEASE" == "true" ]]; then args+=(--prerelease); fi
           gh release create "${args[@]}"
+
+          # Verify the public release URLs actually serve the expected files.
+          curl --fail --location --retry 3 --retry-all-errors --max-time 120 \
+            --output release/verified-manifest.plist "$MANIFEST_URL"
+          python - <<'PY'
+          import plistlib
+          with open("release/verified-manifest.plist", "rb") as f:
+              manifest = plistlib.load(f)
+          items = manifest.get("items") or []
+          if len(items) != 1:
+              raise SystemExit("OTA manifest must contain exactly one app item.")
+          assets = items[0].get("assets") or []
+          package_urls = [a.get("url") for a in assets if a.get("kind") == "software-package"]
+          if len(package_urls) != 1 or not package_urls[0].startswith("https://"):
+              raise SystemExit("OTA manifest has no single valid HTTPS software-package URL.")
+          if not items[0].get("metadata", {}).get("bundle-identifier") or not items[0].get("metadata", {}).get("bundle-version"):
+              raise SystemExit("OTA manifest is missing bundle identifier/version metadata.")
+          if package_urls[0] != "$IPA_ASSET_URL":
+              raise SystemExit("OTA manifest IPA URL does not match the uploaded IPA asset URL.")
+          print("OTA manifest plist parsed and required metadata validated.")
+          PY
+          curl --fail --location --retry 3 --retry-all-errors --max-time 900 \
+            --output /dev/null "$IPA_ASSET_URL"
+          echo "Verified manifest URL: $MANIFEST_URL"
+          echo "Verified IPA URL: $IPA_ASSET_URL"
 
       - name: Show published release
         run: gh release view "${{ steps.metadata.outputs.tag }}" --json name,url,assets
