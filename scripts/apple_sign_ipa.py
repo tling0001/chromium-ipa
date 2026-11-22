@@ -74,8 +74,8 @@ class Apple:
         x=self.req("POST","/certificates",json={"data":{"type":"certificates","attributes":{"certificateType":certificate_type,"csrContent":csr.read_text()}}})["data"]
         der=work/"dist.cer"; der.write_bytes(base64.b64decode(x["attributes"]["certificateContent"]))
         cert=work/"dist.pem"; run("openssl","x509","-inform","DER","-in",str(der),"-out",str(cert))
-        password=secrets.token_urlsafe(30); p12=work/"distribution.p12"
-        run("openssl","pkcs12","-export","-inkey",str(key),"-in",str(cert),"-out",str(p12),"-passout","pass:"+password,"-name","Chromium iOS Ad Hoc")
+        password=secrets.token_urlsafe(30); p12=work/"signing.p12"
+        run("openssl","pkcs12","-export","-inkey",str(key),"-in",str(cert),"-out",str(p12),"-passout","pass:"+password,"-name",f"Chromium iOS {label}")
         print(f"Created {certificate_type} certificate:",x["attributes"].get("serialNumber",""))
         return p12,password
     def profile(self,name,bid_id,cert_id,device_ids,path,profile_type):
@@ -89,9 +89,9 @@ class Apple:
             rel=detail.get("data",{}).get("relationships",{}).get("bundleId",{}).get("data",{})
             if rel.get("id") != bid_id:
                 continue
-            print(f"Deleting duplicate Ad Hoc profile {pid} for {name}; it will be regenerated.")
+            print(f"Deleting duplicate {profile_type} profile {pid} for {name}; it will be regenerated.")
             self.req("DELETE",f"/profiles/{pid}")
-        body={"data":{"type":"profiles","attributes":{"name":name[:100],"profileType":"IOS_APP_ADHOC"},"relationships":{
+        body={"data":{"type":"profiles","attributes":{"name":name[:100],"profileType":profile_type},"relationships":{
             "bundleId":{"data":{"type":"bundleIds","id":bid_id}},
             "certificates":{"data":[{"type":"certificates","id":cert_id}]},
             "devices":{"data":[{"type":"devices","id":d} for d in device_ids]}}}}
