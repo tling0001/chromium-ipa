@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Automate Apple Ad Hoc provisioning and sign an iOS IPA using a Team API key."""
 from __future__ import annotations
-import base64, json, os, re, secrets, subprocess, sys, time
+import base64, hashlib, json, os, re, secrets, subprocess, sys, time
 from pathlib import Path
 from urllib.parse import quote, urlparse
 import jwt, plistlib, requests
@@ -148,11 +148,33 @@ def profile_plist(path,work):
     raw=run("security","cms","-D","-i",str(path),capture=True)
     return plistlib.loads(raw.encode())
 
-def sign_bundle(bundle,profile,identity,work):
+def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id):
     data=profile_plist(profile,work); allowed=data.get("Entitlements",{})
     identifier=bid(bundle); appid=allowed.get("application-identifier","")
     prefix=appid.split(".",1)[0]
-    if not prefix: raise RuntimeError("Profile has no application-identifier for "+identifier)
+    expected_appid=prefix+"."+identifier
+    if not prefix or appid != expected_appid:
+        raise RuntimeError(f"Provisioning profile application-identifier mismatch for {identifier}: expected {expected_appid!r}, got {appid!r}.")
+    prefixes=data.get("ApplicationIdentifierPrefix",[])
+    teams=data.get("TeamIdentifier",[])
+    if prefix not in prefixes or team_id not in teams or allowed.get("com.apple.developer.team-identifier") != team_id:
+        raise RuntimeError(f"Provisioning profile team/prefix mismatch for {identifier}: prefix={prefix!r}, prefixes={prefixes!r}, team={teams!r}, entitlement_team={allowed.get('com.apple.developer.team-identifier')!r}, signing_team={team_id!r}.")
+    expiry=data.get("ExpirationDate")
+    if not expiry or expiry.timestamp() <= time.time():
+        raise RuntimeError(f"Provisioning profile for {identifier} is missing an expiration date or has expired.")
+    provisioned=data.get("ProvisionedDevices")
+    if data.get("ProvisionsAllDevices") is True or not isinstance(provisioned,list) or not provisioned:
+        raise RuntimeError(f"Provisioning profile for {identifier} is not a device-scoped Ad Hoc profile.")
+    missing=sorted(set(enabled_udids)-set(provisioned))
+    if missing:
+        raise RuntimeError(f"Provisioning profile for {identifier} omits {len(missing)} enabled registered device(s): {', '.join(missing)}")
+    if allowed.get("get-task-allow") is not False:
+        raise RuntimeError(f"Provisioning profile for {identifier} does not explicitly disable get-task-allow.")
+    certs=data.get("DeveloperCertificates",[])
+    identity_sha1=identity.replace(" ","").upper()
+    profile_cert_hashes={hashlib.sha1(cert).hexdigest().upper() for cert in certs}
+    if identity_sha1 not in profile_cert_hashes:
+        raise RuntimeError(f"Provisioning profile for {identifier} does not contain the distribution certificate used to sign it (SHA-1 {identity_sha1}).")
     ent=dict(allowed); ent["application-identifier"]=prefix+"."+identifier
     if "com.apple.developer.team-identifier" in ent: ent["com.apple.developer.team-identifier"]=prefix
     if "keychain-access-groups" in ent:
@@ -169,6 +191,12 @@ def sign_bundle(bundle,profile,identity,work):
     ep.write_bytes(plistlib.dumps(ent,fmt=plistlib.FMT_XML,sort_keys=True))
     run("codesign","--force","--sign",identity,"--timestamp=none","--entitlements",str(ep),str(bundle))
     run("codesign","--verify","--strict","--verbose=2",str(bundle))
+    details=subprocess.run(["codesign","-dv","--verbose=4",str(bundle)],text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True)
+    signature=details.stdout+details.stderr
+    signed_id=re.search(r"^Identifier=(.+)$",signature,re.MULTILINE)
+    signed_team=re.search(r"^TeamIdentifier=(.+)$",signature,re.MULTILINE)
+    if not signed_id or signed_id.group(1).strip()!=identifier or not signed_team or signed_team.group(1).strip()!=team_id:
+        raise RuntimeError(f"Final code signature metadata mismatch for {identifier}: {signature[-1800:]}")
 
 def main():
     if len(sys.argv)!=3: raise SystemExit("usage: apple_sign_ipa.py INPUT.ipa OUTPUT.ipa")
@@ -236,6 +264,24 @@ def main():
     m=re.search(r"([0-9A-F]{40})",ident)
     if not m: raise RuntimeError("Imported P12 is not a valid Apple code-signing identity.")
     identity=m.group(1)
+    team_id=env("APPLE_TEAM_ID")
+    if not team_id:
+        # Read the signing certificate's OU (Apple Team ID) from the imported identity.
+        cert_text=run("security","find-certificate","-c",identity,"-p",str(keychain),capture=True)
+        if cert_text:
+            cert_file=work/"signing-cert.pem"; cert_file.write_text(cert_text)
+            subject=run("openssl","x509","-in",str(cert_file),"-noout","-subject",capture=True)
+            team_match=re.search(r"OU=([A-Z0-9]+)",subject)
+            team_id=team_match.group(1) if team_match else ""
+    if not team_id:
+        # The profile's TeamIdentifier is authoritative only after checking it against the actual signing certificate.
+        cert_file=work/"signing-cert.pem"
+        run("openssl","pkcs12","-in",str(p12),"-clcerts","-nokeys","-passin","pass:"+pw,"-out",str(cert_file))
+        subject=run("openssl","x509","-in",str(cert_file),"-noout","-subject",capture=True)
+        team_match=re.search(r"OU=([A-Z0-9]+)",subject)
+        team_id=team_match.group(1) if team_match else ""
+    if not team_id:
+        raise RuntimeError("Could not determine Apple Team ID from the signing certificate.")
 
     profile_dir=work/"profiles"; profile_dir.mkdir(exist_ok=True)
     for bundle in bundles:
@@ -255,7 +301,7 @@ def main():
         run("codesign","--force","--sign",identity,"--timestamp=none",str(p))
     for bundle in bundles:
         profile=profile_dir/(re.sub(r"[^A-Za-z0-9_.-]","_",bid(bundle))+".mobileprovision")
-        sign_bundle(bundle,profile,identity,work)
+        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id)
     run("codesign","--verify","--deep","--strict","--verbose=2",str(root))
     out.parent.mkdir(parents=True,exist_ok=True)
     if out.exists(): out.unlink()
