@@ -264,22 +264,12 @@ def main():
     m=re.search(r"([0-9A-F]{40})",ident)
     if not m: raise RuntimeError("Imported P12 is not a valid Apple code-signing identity.")
     identity=m.group(1)
-    team_id=env("APPLE_TEAM_ID")
-    if not team_id:
-        # Read the signing certificate's OU (Apple Team ID) from the imported identity.
-        cert_text=run("security","find-certificate","-c",identity,"-p",str(keychain),capture=True)
-        if cert_text:
-            cert_file=work/"signing-cert.pem"; cert_file.write_text(cert_text)
-            subject=run("openssl","x509","-in",str(cert_file),"-noout","-subject",capture=True)
-            team_match=re.search(r"OU=([A-Z0-9]+)",subject)
-            team_id=team_match.group(1) if team_match else ""
-    if not team_id:
-        # The profile's TeamIdentifier is authoritative only after checking it against the actual signing certificate.
-        cert_file=work/"signing-cert.pem"
-        run("openssl","pkcs12","-in",str(p12),"-clcerts","-nokeys","-passin","pass:"+pw,"-out",str(cert_file))
-        subject=run("openssl","x509","-in",str(cert_file),"-noout","-subject",capture=True)
-        team_match=re.search(r"OU=([A-Z0-9]+)",subject)
-        team_id=team_match.group(1) if team_match else ""
+    # Read the Apple Team ID from the actual signing certificate, not from the profile.
+    cert_file=work/"signing-cert.pem"
+    run("openssl","pkcs12","-in",str(p12),"-clcerts","-nokeys","-passin","pass:"+pw,"-out",str(cert_file))
+    subject=run("openssl","x509","-in",str(cert_file),"-noout","-subject",capture=True)
+    team_match=re.search(r"OU=([A-Z0-9]+)",subject)
+    team_id=team_match.group(1) if team_match else env("APPLE_TEAM_ID")
     if not team_id:
         raise RuntimeError("Could not determine Apple Team ID from the signing certificate.")
 
