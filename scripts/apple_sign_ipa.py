@@ -71,7 +71,7 @@ class Apple:
         run("openssl","genrsa","-out",str(key),"2048")
         label="Development" if certificate_type=="IOS_DEVELOPMENT" else "Ad Hoc Distribution"
         run("openssl","req","-new","-key",str(key),"-out",str(csr),"-subj",f"/CN=Chromium iOS {label}")
-        x=self.req("POST","/certificates",json={"data":{"type":"certificates","attributes":{"certificateType":"IOS_DISTRIBUTION","csrContent":csr.read_text()}}})["data"]
+        x=self.req("POST","/certificates",json={"data":{"type":"certificates","attributes":{"certificateType":certificate_type,"csrContent":csr.read_text()}}})["data"]
         der=work/"dist.cer"; der.write_bytes(base64.b64decode(x["attributes"]["certificateContent"]))
         cert=work/"dist.pem"; run("openssl","x509","-inform","DER","-in",str(der),"-out",str(cert))
         password=secrets.token_urlsafe(30); p12=work/"distribution.p12"
