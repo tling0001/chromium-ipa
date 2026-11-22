@@ -268,7 +268,7 @@ def main():
     cert_file=work/"signing-cert.pem"
     run("openssl","pkcs12","-in",str(p12),"-clcerts","-nokeys","-passin","pass:"+pw,"-out",str(cert_file))
     subject=run("openssl","x509","-in",str(cert_file),"-noout","-subject",capture=True)
-    team_match=re.search(r"OU\\s*=\\s*([A-Z0-9]+)",subject)
+    team_match=re.search(r"OU\s*=\s*([A-Z0-9]+)",subject)
     team_id=team_match.group(1) if team_match else env("APPLE_TEAM_ID")
     if not team_id:
         raise RuntimeError("Could not determine Apple Team ID from the signing certificate.")
