@@ -160,7 +160,14 @@ jobs:
           args=("$TAG" "release/$IPA_NAME#$IPA_NAME" "release/manifest.plist#manifest.plist"
                 --title "$RELEASE_NAME" --notes-file release/release-notes.md)
           if [[ "$PRERELEASE" == "true" ]]; then args+=(--prerelease); fi
-          gh release create "${args[@]}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Re-running the same app version repairs the existing release instead
+            # of failing because its tag already exists.
+            gh release upload "$TAG" "release/$IPA_NAME#$IPA_NAME" "release/manifest.plist#manifest.plist" --clobber
+            gh release edit "$TAG" --title "$RELEASE_NAME" --notes-file release/release-notes.md
+          else
+            gh release create "${args[@]}"
+          fi
 
           # Verify the public release URLs actually serve the expected files.
           curl --fail --location --retry 3 --retry-all-errors --max-time 120 \
