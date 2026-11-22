@@ -194,11 +194,12 @@ def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_
         ent["keychain-access-groups"]=[x.replace("$(AppIdentifierPrefix)",prefix+".") for x in ent["keychain-access-groups"]]
     if allowed.get(EVA) is not True:
         print(f"::warning::Profile for {identifier} does not authorize {EVA}; signature will be valid only for allowed entitlements and the known startup crash may remain.")
-    groups=allowed.get("com.apple.security.application-groups",[])
-    expected={"group.com.tling0001.chrome","group.com.tling0001.common"}
-    if not expected.issubset(set(groups)):
-        missing=", ".join(sorted(expected-set(groups)))
-        print(f"::warning::Profile for {identifier} is missing Chromium App Groups: {missing}. APP_GROUPS is enabled, but the group containers must be registered and assigned to this App ID in the Apple Developer portal.")
+    if identifier.startswith("com.tling0001.chrome"):
+        groups=allowed.get("com.apple.security.application-groups",[])
+        expected={"group.com.tling0001.chrome","group.com.tling0001.common"}
+        if not expected.issubset(set(groups)):
+            missing=", ".join(sorted(expected-set(groups)))
+            print(f"::warning::Profile for {identifier} is missing Chromium App Groups: {missing}. APP_GROUPS is enabled, but the group containers must be registered and assigned to this App ID in the Apple Developer portal.")
     (bundle/"embedded.mobileprovision").write_bytes(profile.read_bytes())
     ep=work/(re.sub(r"[^A-Za-z0-9_.-]","_",identifier)+".plist")
     ep.write_bytes(plistlib.dumps(ent,fmt=plistlib.FMT_XML,sort_keys=True))
@@ -258,6 +259,8 @@ def main():
     if not root_base:
         raise RuntimeError(f"Cannot derive a valid base bundle identifier from {root_original!r}.")
     root_updated=root_base+".tling"
+    is_chromium=root_base.startswith("com.tling0001.chrome")
+    is_reynard=(root_base=="com.minh-ton.Reynard")
     if root_updated != root_original:
         print(f"Normalized main app bundle identifier: {root_original} -> {root_updated}")
     rewritten={}
@@ -337,14 +340,20 @@ def main():
     profile_dir=work/"profiles"; profile_dir.mkdir(exist_ok=True)
     for bundle in bundles:
         identifier=bid(bundle); app_id=apple.appid(identifier)
-        apple.ensure_capability(app_id,"APP_GROUPS")
-        if bundle == root or identifier.endswith(".CredentialProviderExtension"):
-            apple.ensure_capability(app_id,"AUTOFILL_CREDENTIAL_PROVIDER")
+        # Chromium-specific capabilities must not be imposed on unrelated apps.
+        if is_chromium:
+            apple.ensure_capability(app_id,"APP_GROUPS")
+            if bundle == root or identifier.endswith(".CredentialProviderExtension"):
+                apple.ensure_capability(app_id,"AUTOFILL_CREDENTIAL_PROVIDER")
         filename=re.sub(r"[^A-Za-z0-9_.-]","_",identifier)+".mobileprovision"
         profile=profile_dir/filename
         profile_label="Development" if mode=="development" else "Ad Hoc"
         data=apple.profile("Chromium "+profile_label+" "+identifier,app_id,cert_id,[d["id"] for d in enabled],profile,profile_type)
         print(f"Created {profile_label} profile for {identifier} ({data.get('id')}).")
+        if is_reynard and bundle == root:
+            profile_entitlements=profile_plist(profile,work).get("Entitlements",{})
+            if profile_entitlements.get("com.apple.developer.kernel.increased-memory-limit") is not True:
+                print("::warning::The Reynard profile does not authorize com.apple.developer.kernel.increased-memory-limit. The app will be signed only with profile-authorized entitlements; its increased memory allowance will not be retained.")
     # Sign every actual Mach-O executable/library before signing containing
     # frameworks, extensions, and the main app. Gecko ships bare Mach-O files
     # such as Frameworks/XUL which have no .dylib or .framework suffix; an
@@ -382,7 +391,8 @@ def main():
     run("ditto","-c","-k","--sequesterRsrc","--keepParent",str(payload),str(out))
     print(run("shasum","-a","256",str(out),capture=True).strip())
     print(f"{mode.capitalize()} IPA signed and verified. {len(macho_files)} Mach-O file(s), {len(frameworks)} framework(s), {len(bundles)} app/extension bundle(s), {len(enabled)} registered enabled devices.")
-    print("If App Group warnings appeared, register group.com.tling0001.chrome and group.com.tling0001.common in Certificates, Identifiers & Profiles, then assign both groups to every Chromium app/extension App ID before relying on cross-extension sharing.")
+    if is_chromium:
+        print("If App Group warnings appeared, register group.com.tling0001.chrome and group.com.tling0001.common in Certificates, Identifiers & Profiles, then assign both groups to every Chromium app/extension App ID before relying on cross-extension sharing.")
 
 if __name__=="__main__":
     try: main()
