@@ -20,7 +20,13 @@ The first signing run creates an Apple iOS Distribution certificate and a privat
 - APPLE_AUTO_SIGNING_P12_BASE64
 - APPLE_AUTO_SIGNING_P12_PASSWORD
 
-The workflow's built-in GITHUB_TOKEN cannot write repository secrets. GH_SECRETS_TOKEN is a separate, least-privilege credential used only during the first run to save the generated signing identity. Once both APPLE_AUTO_SIGNING_P12_BASE64 and APPLE_AUTO_SIGNING_P12_PASSWORD have been created, you can delete GH_SECRETS_TOKEN from repository secrets and revoke the fine-grained token. Subsequent runs reuse the saved certificate rather than creating another one and consuming Apple's limited distribution-certificate slots.
+For **Development** signing, the workflow stores a separate identity in:
+
+- APPLE_AUTO_SIGNING_DEV_P12_BASE64
+- APPLE_AUTO_SIGNING_DEV_P12_PASSWORD
+
+The first Development signing run also needs GH_SECRETS_TOKEN so it can save that identity. The development identity is kept separate from the existing distribution identity; selecting Development will not replace or revoke the distribution certificate.
+The workflow's built-in GITHUB_TOKEN cannot write repository secrets. It saves the matching identity secrets for whichever signing mode is selected. GH_SECRETS_TOKEN is a separate, least-privilege credential used only during the first run to save the generated signing identity. Once both APPLE_AUTO_SIGNING_P12_BASE64 and APPLE_AUTO_SIGNING_P12_PASSWORD have been created, you can delete GH_SECRETS_TOKEN from repository secrets and revoke the fine-grained token. Subsequent runs reuse the saved certificate rather than creating another one and consuming Apple's limited distribution-certificate slots.
 
 Create the GitHub token at https://github.com/settings/personal-access-tokens/new. Choose **Fine-grained token**, select only the tling0001/chromium-ipa repository, and grant **Secrets: Read and write**. Add the token as GH_SECRETS_TOKEN. Do not paste it into chat or commit it.
 
@@ -47,10 +53,17 @@ Apple documents App Groups and the required assignment process here: https://dev
 1. Open **Actions → Sign Chromium iOS IPA**.
 2. Click **Run workflow**.
 3. Choose WebKit or Blink and select the latest successful build, a run ID, or a direct IPA URL.
-4. The workflow automatically lists every ENABLED iOS device registered to your Apple Developer team. It does not need a UDID input for devices already registered.
-5. It creates or reuses the Apple distribution certificate, registers explicit App IDs for the app and embedded app extensions, creates Ad Hoc profiles containing all enabled registered devices, signs nested code and app bundles, verifies signatures, and uploads the signed IPA artifact. The signer identifies Mach-O binaries using the macOS `file` utility rather than filename extensions, so extensionless Gecko binaries such as `Frameworks/XUL` are included. It signs Mach-O files first, then framework bundles, then provisioned app/extension bundles, and verifies nested code plus the final app seal.
+4. Choose **Ad Hoc** for the existing distribution-certificate flow, or **Development** to use an Apple Development certificate and an `IOS_APP_DEVELOPMENT` profile. Use Development for apps whose maintainers explicitly disallow distribution-certificate signing, such as Reynard.
+5. The workflow automatically lists every ENABLED iOS device registered to your Apple Developer team. It does not need a UDID input for devices already registered.
+6. It creates or reuses the certificate and profile type for the selected mode, registers explicit App IDs for the app and embedded app extensions, provisions all enabled registered devices, signs nested code and app bundles, verifies signatures, and uploads the signed IPA artifact. The signer identifies Mach-O binaries using the macOS `file` utility rather than filename extensions, so extensionless Gecko binaries such as `Frameworks/XUL` are included. It signs Mach-O files first, then framework bundles, then provisioned app/extension bundles, and verifies nested code plus the final app seal.
 
 You do not need to run **Register Apple Devices for Chromium** if your devices are already registered. That separate workflow is optional for registering additional devices or inspecting the device list.
+
+## Choosing a signing mode
+
+The default **Ad Hoc** mode uses an `IOS_DISTRIBUTION` certificate and `IOS_APP_ADHOC` profiles with `get-task-allow=false`. **Development** mode uses an `IOS_DEVELOPMENT` certificate and `IOS_APP_DEVELOPMENT` profiles with `get-task-allow=true`. Each mode has its own saved P12 secrets and reuses only certificates of its own type.
+
+Reynard's upstream README explicitly says distribution-certificate sideloading is unsupported. For Reynard, select **Development** rather than Ad Hoc. This aligns the signing identity with the installation method its maintainers support (AltStore/SideStore-style development signing), but does not guarantee compatibility with every third-party installer or custom bundle-ID rewrite.
 
 ## Publishing workflow safety
 
