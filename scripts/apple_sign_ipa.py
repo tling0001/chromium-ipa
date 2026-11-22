@@ -176,7 +176,7 @@ def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id):
     if identity_sha1 not in profile_cert_hashes:
         raise RuntimeError(f"Provisioning profile for {identifier} does not contain the distribution certificate used to sign it (SHA-1 {identity_sha1}).")
     ent=dict(allowed); ent["application-identifier"]=prefix+"."+identifier
-    if "com.apple.developer.team-identifier" in ent: ent["com.apple.developer.team-identifier"]=prefix
+    if "com.apple.developer.team-identifier" in ent: ent["com.apple.developer.team-identifier"]=team_id
     if "keychain-access-groups" in ent:
         ent["keychain-access-groups"]=[x.replace("$(AppIdentifierPrefix)",prefix+".") for x in ent["keychain-access-groups"]]
     if allowed.get(EVA) is not True:
@@ -268,7 +268,7 @@ def main():
     cert_file=work/"signing-cert.pem"
     run("openssl","pkcs12","-in",str(p12),"-clcerts","-nokeys","-passin","pass:"+pw,"-out",str(cert_file))
     subject=run("openssl","x509","-in",str(cert_file),"-noout","-subject",capture=True)
-    team_match=re.search(r"OU=([A-Z0-9]+)",subject)
+    team_match=re.search(r"OU\\s*=\\s*([A-Z0-9]+)",subject)
     team_id=team_match.group(1) if team_match else env("APPLE_TEAM_ID")
     if not team_id:
         raise RuntimeError("Could not determine Apple Team ID from the signing certificate.")
