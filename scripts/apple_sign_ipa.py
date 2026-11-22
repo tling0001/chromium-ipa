@@ -10,6 +10,8 @@ from nacl.public import PublicKey, SealedBox
 API = "https://api.appstoreconnect.apple.com/v1"
 P12_SECRET = "APPLE_AUTO_SIGNING_P12_BASE64"
 PASS_SECRET = "APPLE_AUTO_SIGNING_P12_PASSWORD"
+DEV_P12_SECRET = "APPLE_AUTO_SIGNING_DEV_P12_BASE64"
+DEV_PASS_SECRET = "APPLE_AUTO_SIGNING_DEV_P12_PASSWORD"
 EVA = "com.apple.developer.kernel.extended-virtual-addressing"
 
 def env(k, default=""): return os.environ.get(k, default).strip()
@@ -60,14 +62,15 @@ class Apple:
             return
         self.req("POST","/bundleIdCapabilities",json={"data":{"type":"bundleIdCapabilities","attributes":{"capabilityType":capability},"relationships":{"bundleId":{"data":{"type":"bundleIds","id":bundle_id_id}}}}})
         print(f"Enabled capability: {capability}")
-    def certs(self):
+    def certs(self,certificate_type):
         # Do not request/require the undocumented "activated" field: the
         # Certificates API may omit it even for a valid current certificate.
-        return self.pages("/certificates?filter[certificateType]=IOS_DISTRIBUTION&limit=200&fields[certificates]=certificateType,serialNumber,expirationDate")
-    def create_cert(self,work):
-        key=work/"dist.key"; csr=work/"dist.csr"
+        return self.pages(f"/certificates?filter[certificateType]={certificate_type}&limit=200&fields[certificates]=certificateType,serialNumber,expirationDate")
+    def create_cert(self,work,certificate_type):
+        key=work/"signing.key"; csr=work/"signing.csr"
         run("openssl","genrsa","-out",str(key),"2048")
-        run("openssl","req","-new","-key",str(key),"-out",str(csr),"-subj","/CN=Chromium iOS Ad Hoc Distribution")
+        label="Development" if certificate_type=="IOS_DEVELOPMENT" else "Ad Hoc Distribution"
+        run("openssl","req","-new","-key",str(key),"-out",str(csr),"-subj",f"/CN=Chromium iOS {label}")
         x=self.req("POST","/certificates",json={"data":{"type":"certificates","attributes":{"certificateType":"IOS_DISTRIBUTION","csrContent":csr.read_text()}}})["data"]
         der=work/"dist.cer"; der.write_bytes(base64.b64decode(x["attributes"]["certificateContent"]))
         cert=work/"dist.pem"; run("openssl","x509","-inform","DER","-in",str(der),"-out",str(cert))
@@ -75,11 +78,10 @@ class Apple:
         run("openssl","pkcs12","-export","-inkey",str(key),"-in",str(cert),"-out",str(p12),"-passout","pass:"+password,"-name","Chromium iOS Ad Hoc")
         print("Created IOS_DISTRIBUTION certificate:",x["attributes"].get("serialNumber",""))
         return p12,password
-    def profile(self,name,bid_id,cert_id,device_ids,path):
-        # Replace only an existing profile with this exact generated name
-        # and App ID. This avoids Apple's HTTP 409 duplicate-name response
-        # while ensuring the replacement includes the current cert/devices.
-        for existing in self.pages("/profiles?filter[profileType]=IOS_APP_ADHOC&limit=200"):
+    def profile(self,name,bid_id,cert_id,device_ids,path,profile_type):
+        # Replace only an existing profile with this exact generated name,
+        # App ID, and profile type.
+        for existing in self.pages(f"/profiles?filter[profileType]={profile_type}&limit=200"):
             if existing.get("attributes",{}).get("name") != name[:100]:
                 continue
             pid=existing["id"]
@@ -114,14 +116,17 @@ def cert_serial(p12,password,work):
     run("openssl","pkcs12","-in",str(p12),"-clcerts","-nokeys","-passin","pass:"+password,"-out",str(pem))
     return run("openssl","x509","-in",str(pem),"-noout","-serial",capture=True).strip().split("=",1)[-1].lstrip("0").upper() or "0"
 
-def signing_cert(apple,work):
-    b64,pw=env(P12_SECRET),env(PASS_SECRET)
-    if bool(b64)!=bool(pw): raise RuntimeError("Both auto signing P12 secrets must exist together.")
+def signing_cert(apple,work,certificate_type):
+    is_development=certificate_type=="IOS_DEVELOPMENT"
+    p12_secret=DEV_P12_SECRET if is_development else P12_SECRET
+    pass_secret=DEV_PASS_SECRET if is_development else PASS_SECRET
+    b64,pw=env(p12_secret),env(pass_secret)
+    if bool(b64)!=bool(pw): raise RuntimeError(f"Both {p12_secret} and {pass_secret} secrets must exist together.")
     if b64:
         p12=work/"saved.p12"; p12.write_bytes(base64.b64decode(b64))
         run("openssl","pkcs12","-in",str(p12),"-passin","pass:"+pw,"-noout")
         serial=cert_serial(p12,pw,work)
-        for c in apple.certs():
+        for c in apple.certs(certificate_type):
             a=c.get("attributes",{}); s=(a.get("serialNumber") or "").replace(":","").lstrip("0").upper() or "0"
             # Missing "activated" is not evidence of revocation. Only reject
             # an explicit false value; Apple exposes expiration separately.
@@ -129,14 +134,14 @@ def signing_cert(apple,work):
                 print("Reusing saved Apple distribution certificate:", c["id"])
                 return p12,pw,c["id"]
         print("Saved certificate was not found in Apple's current certificate list; checking before requesting another.")
-    p12,pw=apple.create_cert(work); serial=cert_serial(p12,pw,work); found=None
-    for c in apple.certs():
+    p12,pw=apple.create_cert(work,certificate_type); serial=cert_serial(p12,pw,work); found=None
+    for c in apple.certs(certificate_type):
         a=c.get("attributes",{}); s=(a.get("serialNumber") or "").replace(":","").lstrip("0").upper() or "0"
         if s==serial: found=c; break
     if not found:
         raise RuntimeError("New Apple certificate was created but is not yet visible in the API. Retry signing; the saved P12 will be reused once Apple lists it.")
-    gh_secret(P12_SECRET,base64.b64encode(p12.read_bytes()).decode())
-    gh_secret(PASS_SECRET,pw)
+    gh_secret(p12_secret,base64.b64encode(p12.read_bytes()).decode())
+    gh_secret(pass_secret,pw)
     return p12,pw,found["id"]
 
 def bid(bundle):
@@ -155,7 +160,7 @@ def profile_plist(path,work):
     raw=run("security","cms","-D","-i",str(path),capture=True)
     return plistlib.loads(raw.encode())
 
-def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id):
+def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_task_allow):
     data=profile_plist(profile,work); allowed=data.get("Entitlements",{})
     identifier=bid(bundle); appid=allowed.get("application-identifier","")
     prefix=appid.split(".",1)[0]
@@ -175,8 +180,9 @@ def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id):
     missing=sorted(set(enabled_udids)-set(provisioned))
     if missing:
         raise RuntimeError(f"Provisioning profile for {identifier} omits {len(missing)} enabled registered device(s): {', '.join(missing)}")
-    if allowed.get("get-task-allow") is not False:
-        raise RuntimeError(f"Provisioning profile for {identifier} does not explicitly disable get-task-allow.")
+    if allowed.get("get-task-allow") is not expected_get_task_allow:
+        expected="enable" if expected_get_task_allow else "disable"
+        raise RuntimeError(f"Provisioning profile for {identifier} does not explicitly {expected} get-task-allow for this signing mode.")
     certs=data.get("DeveloperCertificates",[])
     identity_sha1=identity.replace(" ","").upper()
     profile_cert_hashes={hashlib.sha1(cert).hexdigest().upper() for cert in certs}
@@ -206,7 +212,14 @@ def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id):
         raise RuntimeError(f"Final code signature metadata mismatch for {identifier}: {signature[-1800:]}")
 
 def main():
-    if len(sys.argv)!=3: raise SystemExit("usage: apple_sign_ipa.py INPUT.ipa OUTPUT.ipa")
+    if len(sys.argv) not in (3,4): raise SystemExit("usage: apple_sign_ipa.py INPUT.ipa OUTPUT.ipa [adhoc|development]")
+    mode=(sys.argv[3] if len(sys.argv)==4 else env("SIGNING_MODE","adhoc")).lower()
+    if mode not in ("adhoc","development"):
+        raise RuntimeError("SIGNING_MODE must be either 'adhoc' or 'development'.")
+    certificate_type="IOS_DEVELOPMENT" if mode=="development" else "IOS_DISTRIBUTION"
+    profile_type="IOS_APP_DEVELOPMENT" if mode=="development" else "IOS_APP_ADHOC"
+    expected_get_task_allow=(mode=="development")
+    print(f"Signing mode: {mode} ({certificate_type}, {profile_type})")
     source,out=Path(sys.argv[1]).resolve(),Path(sys.argv[2]).resolve()
     if not source.is_file(): raise RuntimeError("Input IPA does not exist: "+str(source))
     work=Path("apple-signing-work").resolve(); work.mkdir(parents=True,exist_ok=True)
@@ -289,7 +302,7 @@ def main():
 
     # Provisioning starts only after the IPA's IDs pass the ownership check
     # and all bundle identifiers have been rewritten.
-    p12,pw,cert_id=signing_cert(apple,work)
+    p12,pw,cert_id=signing_cert(apple,work,certificate_type)
 
     # Import only after signing_cert has returned a real P12 and password.
     # Keep keychain creation after IPA ownership validation as well, so a
@@ -323,8 +336,9 @@ def main():
             apple.ensure_capability(app_id,"AUTOFILL_CREDENTIAL_PROVIDER")
         filename=re.sub(r"[^A-Za-z0-9_.-]","_",identifier)+".mobileprovision"
         profile=profile_dir/filename
-        data=apple.profile("Chromium Ad Hoc "+identifier,app_id,cert_id,[d["id"] for d in enabled],profile)
-        print(f"Created Ad Hoc profile for {identifier} ({data.get('id')}).")
+        profile_label="Development" if mode=="development" else "Ad Hoc"
+        data=apple.profile("Chromium "+profile_label+" "+identifier,app_id,cert_id,[d["id"] for d in enabled],profile,profile_type)
+        print(f"Created {profile_label} profile for {identifier} ({data.get('id')}).")
     # Sign every actual Mach-O executable/library before signing containing
     # frameworks, extensions, and the main app. Gecko ships bare Mach-O files
     # such as Frameworks/XUL which have no .dylib or .framework suffix; an
@@ -350,7 +364,7 @@ def main():
     # exact entitlements authorized by their matching Ad Hoc profiles.
     for bundle in bundles:
         profile=profile_dir/(re.sub(r"[^A-Za-z0-9_.-]","_",bid(bundle))+".mobileprovision")
-        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id)
+        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id,expected_get_task_allow)
 
     # Verify each Mach-O independently after its containing bundles have been
     # signed, then verify the complete app seal recursively.
@@ -361,7 +375,7 @@ def main():
     if out.exists(): out.unlink()
     run("ditto","-c","-k","--sequesterRsrc","--keepParent",str(payload),str(out))
     print(run("shasum","-a","256",str(out),capture=True).strip())
-    print(f"Ad Hoc IPA signed and verified. {len(macho_files)} Mach-O file(s), {len(frameworks)} framework(s), {len(bundles)} app/extension bundle(s), {len(enabled)} registered enabled devices.")
+    print(f"{mode.capitalize()} IPA signed and verified. {len(macho_files)} Mach-O file(s), {len(frameworks)} framework(s), {len(bundles)} app/extension bundle(s), {len(enabled)} registered enabled devices.")
     print("If App Group warnings appeared, register group.com.tling0001.chrome and group.com.tling0001.common in Certificates, Identifiers & Profiles, then assign both groups to every Chromium app/extension App ID before relying on cross-extension sharing.")
 
 if __name__=="__main__":
