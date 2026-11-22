@@ -223,9 +223,15 @@ def main():
     if len(set(identifiers)) != len(identifiers):
         raise RuntimeError("The source IPA contains duplicate app/extension bundle identifiers.")
 
-    # Give every app/extension a team-specific suffix before registering
-    # App IDs with Apple. The on-disk Info.plist identifiers must match the
-    # identifiers used for provisioning and the final code signature.
+    # Namespace the containing app once, then preserve that prefix for every
+    # embedded executable bundle. App extension IDs must begin with the
+    # containing app's bundle ID; appending ".tling" independently to each
+    # original ID breaks that required parent/extension relationship.
+    root_info=plistlib.loads((root/"Info.plist").read_bytes())
+    root_original=root_info.get("CFBundleIdentifier")
+    if not root_original:
+        raise RuntimeError("Main app is missing CFBundleIdentifier.")
+    root_updated=root_original if root_original.endswith(".tling") else root_original+".tling"
     rewritten={}
     for bundle in bundles:
         info=bundle/"Info.plist"
@@ -233,17 +239,38 @@ def main():
         original=metadata.get("CFBundleIdentifier")
         if not original:
             raise RuntimeError("Missing CFBundleIdentifier: "+str(bundle))
-        updated=original if original.endswith(".tling") else original+".tling"
+        if bundle == root:
+            updated=root_updated
+        elif original.startswith(root_original+"."):
+            updated=root_updated+original[len(root_original):]
+        else:
+            raise RuntimeError(
+                f"Embedded executable bundle {original!r} is not inside the main app "
+                f"bundle-ID namespace {root_original!r}; refusing to produce an invalid IPA."
+            )
         if updated in rewritten.values():
-            raise RuntimeError("Bundle ID suffixing produced a duplicate identifier: "+updated)
+            raise RuntimeError("Bundle ID rewriting produced a duplicate identifier: "+updated)
         metadata["CFBundleIdentifier"]=updated
+        # Update companion-bundle references if present, before signing.
+        def rewrite_references(value):
+            if isinstance(value,dict):
+                return {k:rewrite_references(v) for k,v in value.items()}
+            if isinstance(value,list):
+                return [rewrite_references(v) for v in value]
+            if isinstance(value,str):
+                if value == root_original:
+                    return root_updated
+                if value.startswith(root_original+"."):
+                    return root_updated+value[len(root_original):]
+            return value
+        metadata=rewrite_references(metadata)
         info.write_bytes(plistlib.dumps(metadata,fmt=plistlib.FMT_XML,sort_keys=True))
         rewritten[original]=updated
         print(f"Rewrote bundle identifier: {original} -> {updated}")
 
     identifiers=[bid(bundle) for bundle in bundles]
-    if any(not identifier.endswith(".tling") for identifier in identifiers):
-        raise RuntimeError("Internal error: not all bundle identifiers end in .tling.")
+    if any(not identifier.startswith(root_updated) for identifier in identifiers):
+        raise RuntimeError("Internal error: an embedded executable bundle is outside the rewritten main app bundle-ID namespace.")
 
     # Provisioning starts only after the IPA's IDs pass the ownership check
     # and all bundle identifiers have been rewritten.
