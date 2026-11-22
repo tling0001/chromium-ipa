@@ -1,4 +1,4 @@
-name: Sign Chromium iOS IPA
+name: Sign iOS IPA
 
 on:
   workflow_dispatch:
@@ -152,7 +152,7 @@ jobs:
       - name: Upload signed IPA
         uses: actions/upload-artifact@v4
         with:
-          name: chromium-ios-${{ inputs.variant }}-adhoc-signed
+          name: chromium-ios-${{ inputs.variant }}-${{ inputs.signing_mode }}-signed
           path: output/*.ipa
           if-no-files-found: error
           compression-level: 0
