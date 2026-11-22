@@ -273,7 +273,7 @@ def main():
             child_suffix=original[len(root_original):]
             # Older versions appended .tling independently to each extension.
             # Remove that trailing marker while retaining the extension name.
-            child_suffix=re.sub(r"(?:\\.tling)+$", "", child_suffix)
+            child_suffix=re.sub(r"(?:\.tling)+$", "", child_suffix)
             updated=root_updated+child_suffix
         else:
             raise RuntimeError(
@@ -294,7 +294,7 @@ def main():
                     return root_updated
                 if value.startswith(root_original+"."):
                     child_suffix=value[len(root_original):]
-                    child_suffix=re.sub(r"(?:\\.tling)+$", "", child_suffix)
+                    child_suffix=re.sub(r"(?:\.tling)+$", "", child_suffix)
                     return root_updated+child_suffix
             return value
         metadata=rewrite_references(metadata)
