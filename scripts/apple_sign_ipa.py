@@ -76,7 +76,7 @@ class Apple:
         cert=work/"dist.pem"; run("openssl","x509","-inform","DER","-in",str(der),"-out",str(cert))
         password=secrets.token_urlsafe(30); p12=work/"distribution.p12"
         run("openssl","pkcs12","-export","-inkey",str(key),"-in",str(cert),"-out",str(p12),"-passout","pass:"+password,"-name","Chromium iOS Ad Hoc")
-        print("Created IOS_DISTRIBUTION certificate:",x["attributes"].get("serialNumber",""))
+        print(f"Created {certificate_type} certificate:",x["attributes"].get("serialNumber",""))
         return p12,password
     def profile(self,name,bid_id,cert_id,device_ids,path,profile_type):
         # Replace only an existing profile with this exact generated name,
