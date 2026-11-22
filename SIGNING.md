@@ -1,4 +1,4 @@
-# Automated Chromium iOS Ad Hoc signing
+# Automated iOS IPA signing
 
 The **Sign Chromium iOS IPA** workflow uses an App Store Connect Team API key to create Apple signing assets and sign the unsigned WebKit or Blink IPA. It does not require manually exported certificate or provisioning-profile files.
 
@@ -15,7 +15,7 @@ The Apple API key must be a **Team API Key** with the **Admin** role. Individual
 
 ### Why GH_SECRETS_TOKEN is needed
 
-The first signing run creates an Apple iOS Distribution certificate and a private key on the macOS runner. The workflow encrypts the P12 and its password using GitHub's repository-secret public key, then saves them as two additional encrypted repository secrets:
+The first signing run for a selected mode creates the matching Apple signing certificate and private key on the macOS runner. The workflow encrypts the P12 and its password using GitHub's repository-secret public key, then saves them as mode-specific encrypted repository secrets:
 
 - APPLE_AUTO_SIGNING_P12_BASE64
 - APPLE_AUTO_SIGNING_P12_PASSWORD
@@ -26,7 +26,7 @@ For **Development** signing, the workflow stores a separate identity in:
 - APPLE_AUTO_SIGNING_DEV_P12_PASSWORD
 
 The first Development signing run also needs GH_SECRETS_TOKEN so it can save that identity. The development identity is kept separate from the existing distribution identity; selecting Development will not replace or revoke the distribution certificate.
-The workflow's built-in GITHUB_TOKEN cannot write repository secrets. It saves the matching identity secrets for whichever signing mode is selected. GH_SECRETS_TOKEN is a separate, least-privilege credential used only during the first run to save the generated signing identity. Once both APPLE_AUTO_SIGNING_P12_BASE64 and APPLE_AUTO_SIGNING_P12_PASSWORD have been created, you can delete GH_SECRETS_TOKEN from repository secrets and revoke the fine-grained token. Subsequent runs reuse the saved certificate rather than creating another one and consuming Apple's limited distribution-certificate slots.
+The workflow's built-in GITHUB_TOKEN cannot write repository secrets. It saves the matching identity secrets for whichever signing mode is selected. GH_SECRETS_TOKEN is a separate, least-privilege credential used only during the first run to save the generated signing identity. Once the selected mode's P12 and password secrets have been created, you can delete GH_SECRETS_TOKEN from repository secrets and revoke the fine-grained token. Subsequent runs reuse the saved certificate rather than creating another one.
 
 Create the GitHub token at https://github.com/settings/personal-access-tokens/new. Choose **Fine-grained token**, select only the tling0001/chromium-ipa repository, and grant **Secrets: Read and write**. Add the token as GH_SECRETS_TOKEN. Do not paste it into chat or commit it.
 
@@ -63,7 +63,7 @@ You do not need to run **Register Apple Devices for Chromium** if your devices a
 
 The default **Ad Hoc** mode uses an `IOS_DISTRIBUTION` certificate and `IOS_APP_ADHOC` profiles with `get-task-allow=false`. **Development** mode uses an `IOS_DEVELOPMENT` certificate and `IOS_APP_DEVELOPMENT` profiles with `get-task-allow=true`. Each mode has its own saved P12 secrets and reuses only certificates of its own type.
 
-Reynard's upstream README explicitly says distribution-certificate sideloading is unsupported. For Reynard, select **Development** rather than Ad Hoc. This aligns the signing identity with the installation method its maintainers support (AltStore/SideStore-style development signing), but does not guarantee compatibility with every third-party installer or custom bundle-ID rewrite.
+Reynard's upstream README explicitly says distribution-certificate sideloading is unsupported. For Reynard, select **Development** rather than Ad Hoc. This aligns the signing identity with the installation method its maintainers support (AltStore/SideStore-style development signing), but does not guarantee compatibility with every third-party installer or custom bundle-ID rewrite. Reynard also requests `com.apple.developer.kernel.increased-memory-limit`. The signer checks whether Apple's generated profile actually grants that entitlement and warns if it does not; it never invents an entitlement that the profile does not authorize. A Development certificate alone does not prove that this memory entitlement was granted.
 
 ## Publishing workflow safety
 
