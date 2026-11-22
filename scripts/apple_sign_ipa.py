@@ -131,7 +131,7 @@ def signing_cert(apple,work,certificate_type):
             # Missing "activated" is not evidence of revocation. Only reject
             # an explicit false value; Apple exposes expiration separately.
             if s==serial and a.get("activated") is not False:
-                print("Reusing saved Apple distribution certificate:", c["id"])
+                print(f"Reusing saved Apple {certificate_type} certificate:", c["id"])
                 return p12,pw,c["id"]
         print("Saved certificate was not found in Apple's current certificate list; checking before requesting another.")
     p12,pw=apple.create_cert(work,certificate_type); serial=cert_serial(p12,pw,work); found=None
@@ -270,7 +270,11 @@ def main():
         if bundle == root:
             updated=root_updated
         elif original.startswith(root_original+"."):
-            updated=root_updated+original[len(root_original):]
+            child_suffix=original[len(root_original):]
+            # Older versions appended .tling independently to each extension.
+            # Remove that trailing marker while retaining the extension name.
+            child_suffix=re.sub(r"(?:\\.tling)+$", "", child_suffix)
+            updated=root_updated+child_suffix
         else:
             raise RuntimeError(
                 f"Embedded executable bundle {original!r} is not inside the main app "
@@ -289,7 +293,9 @@ def main():
                 if value == root_original:
                     return root_updated
                 if value.startswith(root_original+"."):
-                    return root_updated+value[len(root_original):]
+                    child_suffix=value[len(root_original):]
+                    child_suffix=re.sub(r"(?:\\.tling)+$", "", child_suffix)
+                    return root_updated+child_suffix
             return value
         metadata=rewrite_references(metadata)
         info.write_bytes(plistlib.dumps(metadata,fmt=plistlib.FMT_XML,sort_keys=True))
