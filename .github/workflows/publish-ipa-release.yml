@@ -93,21 +93,22 @@ jobs:
               if len(app_plists) != 1:
                   raise SystemExit(f"Expected exactly one top-level app Info.plist; found {len(app_plists)}.")
               info = plistlib.loads(z.read(app_plists[0]))
+              localized_info = {}
+              app_dir = app_plists[0].rsplit("/", 1)[0]
+              for locale in ("en.lproj", "Base.lproj"):
+                  localized_path = f"{app_dir}/{locale}/InfoPlist.strings"
+                  if localized_path in z.namelist():
+                      try:
+                          localized_info[locale] = plistlib.loads(z.read(localized_path))
+                      except Exception:
+                          pass
 
           bundle_id = str(info.get("CFBundleIdentifier") or "").strip()
           app_name = str(info.get("CFBundleDisplayName") or "").strip()
           if not app_name:
-              # Some apps keep their visible name in a localized InfoPlist.strings
-              # instead of the root Info.plist.
-              app_dir = app_plists[0].rsplit("/", 1)[0]
+              # Some apps keep their visible name in localized InfoPlist.strings.
               for locale in ("en.lproj", "Base.lproj"):
-                  localized_path = f"{app_dir}/{locale}/InfoPlist.strings"
-                  if localized_path not in z.namelist():
-                      continue
-                  try:
-                      localized = plistlib.loads(z.read(localized_path))
-                  except Exception:
-                      continue
+                  localized = localized_info.get(locale, {})
                   app_name = str(localized.get("CFBundleDisplayName") or localized.get("CFBundleName") or "").strip()
                   if app_name:
                       break
