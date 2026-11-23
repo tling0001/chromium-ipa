@@ -6,6 +6,7 @@ on:
     paths:
       - "scripts/apple_sign_ipa.py"
       - "scripts/apple_devices.py"
+      - "tests/**"
       - ".github/workflows/sign-ios.yml"
       - ".github/workflows/publish-ipa-release.yml"
       - ".github/workflows/apple-device-registration.yml"
