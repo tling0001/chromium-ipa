@@ -249,6 +249,88 @@ class EntitlementSigningTests(unittest.TestCase):
             ["applinks:libbyapp.com", "webcredentials:libbyapp.com"],
         )
 
+    def test_associated_domains_filters_custom_url_schemes_and_ungranted_hosts(self):
+        requested = {
+            "com.apple.developer.associated-domains": [
+                "applinks:example.com",
+                "webcredentials:login.example.com",
+                "sapphire://autoSuggest?query=cat",
+                r"applinks:www\\.example.com",
+            ],
+        }
+        allowed = {
+            "application-identifier": "NEWTEAM.com.example.app",
+            "com.apple.developer.team-identifier": "NEWTEAM",
+            "get-task-allow": False,
+            "com.apple.developer.associated-domains": [
+                "applinks:example.com",
+                "webcredentials:login.example.com",
+            ],
+        }
+        result = signer.build_signing_entitlements(
+            requested, allowed, "com.example.app", "NEWTEAM", False
+        )
+        self.assertEqual(
+            result["com.apple.developer.associated-domains"],
+            ["applinks:example.com", "webcredentials:login.example.com"],
+        )
+
+    def test_enabled_capability_does_not_reuse_profile_missing_entitlement(self):
+        import base64
+        import plistlib
+        import tempfile
+        from datetime import datetime, timedelta, timezone
+
+        old_profile = base64.b64encode(plistlib.dumps({
+            "Entitlements": {"application-identifier": "TEAM.com.example.app"}
+        })).decode()
+        new_profile = base64.b64encode(plistlib.dumps({
+            "Entitlements": {
+                "application-identifier": "TEAM.com.example.app",
+                "com.apple.developer.associated-domains": True,
+            }
+        })).decode()
+
+        class FakeApple(signer.Apple):
+            def __init__(self):
+                self.deleted = []
+                self.posted = False
+            def pages(self, path):
+                return [{"id": "old-profile", "attributes": {"name": "App Ad Hoc [bundle-id]"}}]
+            def req(self, method, path, **kwargs):
+                if method == "GET":
+                    return {"data": {
+                        "id": "old-profile",
+                        "attributes": {
+                            "createdDate": "2026-01-01T00:00:00Z",
+                            "profileState": "ACTIVE",
+                            "expirationDate": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
+                            "profileContent": old_profile,
+                        },
+                        "relationships": {
+                            "bundleId": {"data": {"id": "bundle-id"}},
+                            "certificates": {"data": [{"id": "cert-id"}]},
+                            "devices": {"data": [{"id": "device-1"}]},
+                        },
+                    }}
+                if method == "DELETE":
+                    self.deleted.append(path)
+                    return {}
+                if method == "POST":
+                    self.posted = True
+                    return {"data": {"id": "new-profile", "attributes": {"profileContent": new_profile}}}
+                raise AssertionError(method)
+
+        apple = FakeApple()
+        with tempfile.TemporaryDirectory() as directory:
+            apple.profile(
+                "App Ad Hoc", "bundle-id", "cert-id", ["device-1"],
+                pathlib.Path(directory) / "profile.mobileprovision",
+                "IOS_APP_ADHOC", ["com.apple.developer.associated-domains"],
+            )
+        self.assertEqual(apple.deleted, ["/profiles/old-profile"])
+        self.assertTrue(apple.posted)
+
     def test_ungranted_associated_domains_are_dropped_without_failing(self):
         requested = {
             "com.apple.developer.associated-domains": [
