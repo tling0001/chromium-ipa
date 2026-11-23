@@ -60,7 +60,7 @@ jobs:
       - name: Install signing dependencies
         run: python -m pip install --disable-pip-version-check 'PyJWT[crypto]' requests pynacl
 
-      - name: Rewrite bundle IDs, register App IDs, and sign IPA
+      - name: Inspect IPA entitlements, register App IDs and capabilities, and sign IPA
         shell: bash
         env:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
