@@ -98,7 +98,7 @@ class Apple:
             self.req("POST","/bundleIdCapabilities",json={"data":{"type":"bundleIdCapabilities","attributes":{"capabilityType":capability},"relationships":{"bundleId":{"data":{"type":"bundleIds","id":bundle_id_id}}}}})
         except RuntimeError as error:
             detail=str(error)
-            if "HTTP 403" in detail or "HTTP 409" in detail:
+            if "HTTP 403" in detail:
                 print(f"::warning::Skipping {capability} for {identifier}: Apple rejected automatic enablement ({detail}). If this is a managed capability, the Account Holder must request/obtain approval in Certificates, Identifiers & Profiles → Capability Requests, then enable it under Capabilities. Signing will continue without this entitlement if the profile does not authorize it.")
                 return False
             raise
