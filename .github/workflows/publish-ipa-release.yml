@@ -89,8 +89,16 @@ jobs:
               if len(app_plists) != 1:
                   raise SystemExit(f"Expected exactly one top-level app Info.plist; found {len(app_plists)}.")
               info = plistlib.loads(z.read(app_plists[0]))
-              localized_info = {}
               app_dir = app_plists[0].rsplit("/", 1)[0]
+              icon_candidates = [
+                  n for n in z.namelist()
+                  if n.startswith(app_dir + "/")
+                  and n.rsplit("/", 1)[-1] == "AppIcon60x60@2x.png"
+                  and ".appex/" not in n
+              ]
+              icon_path = min(icon_candidates, key=lambda n: (n.count("/"), len(n))) if icon_candidates else None
+              icon_bytes = z.read(icon_path) if icon_path else None
+              localized_info = {}
               for locale in ("en.lproj", "Base.lproj"):
                   localized_path = f"{app_dir}/{locale}/InfoPlist.strings"
                   if localized_path in z.namelist():
@@ -124,6 +132,12 @@ jobs:
           ipa_name = f"{bundle_id}-{version}.ipa"
           with open(ipa, "rb") as src, open("release/" + ipa_name, "wb") as dst:
               dst.write(src.read())
+          if icon_bytes:
+              with open("release/app-icon.png", "wb") as icon_file:
+                  icon_file.write(icon_bytes)
+              print(f"Extracted app icon from {icon_path}")
+          else:
+              print("No AppIcon60x60@2x.png found in the main app bundle; publishing without an icon.")
 
           # Git refs cannot contain spaces, so use the exact release-name
           # components with the separator normalized to a hyphen.
@@ -169,7 +183,8 @@ jobs:
           **App version:** `{version}`
           **Signing mode:** `{signing_mode}`
 
-          Assets: `{ipa_name}` and `manifest.plist`.
+          App icon: `app-icon.png` (included when the IPA contains AppIcon60x60@2x.png).
+          Assets: `{ipa_name}`, `manifest.plist`, and optional `app-icon.png`.
           """
           with open("release/release-notes.md", "w", encoding="utf-8") as f:
               f.write(notes)
@@ -183,6 +198,7 @@ jobs:
               f.write(f"tag={tag}\n")
               f.write(f"manifest_url={manifest_url}\n")
               f.write(f"ipa_asset_url={ipa_asset_url}\n")
+              f.write(f"icon_available={'true' if icon_bytes else 'false'}\n")
           PY
 
       - name: Create GitHub release and upload IPA + manifest
@@ -196,13 +212,16 @@ jobs:
           IPA_ASSET_URL: ${{ steps.metadata.outputs.ipa_asset_url }}
         run: |
           set -euo pipefail
-          args=("$TAG" "release/$IPA_NAME#$IPA_NAME" "release/manifest.plist#manifest.plist"
-                --title "$RELEASE_NAME" --notes-file release/release-notes.md)
+          upload_assets=("release/$IPA_NAME#$IPA_NAME" "release/manifest.plist#manifest.plist")
+          if [[ -f release/app-icon.png ]]; then
+            upload_assets+=("release/app-icon.png#app-icon.png")
+          fi
+          args=("$TAG" "${upload_assets[@]}" --title "$RELEASE_NAME" --notes-file release/release-notes.md)
           if [[ "$PRERELEASE" == "true" ]]; then args+=(--prerelease); fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             # Re-running the same app version repairs the existing release instead
             # of failing because its tag already exists.
-            gh release upload "$TAG" "release/$IPA_NAME#$IPA_NAME" "release/manifest.plist#manifest.plist" --clobber
+            gh release upload "$TAG" "${upload_assets[@]}" --clobber
             gh release edit "$TAG" --title "$RELEASE_NAME" --notes-file release/release-notes.md
           else
             gh release create "${args[@]}"
