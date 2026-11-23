@@ -73,23 +73,33 @@ class Apple:
             x=self.req("GET",url); out+=x.get("data",[]); url=x.get("links",{}).get("next")
         return out
     def devices(self): return self.pages("/devices?filter[platform]=IOS&limit=200&fields[devices]=name,platform,udid,status")
-    def appid(self,bid):
+    def appid(self,bid,display_name):
         for x in self.pages("/bundleIds?filter[identifier]="+quote(bid,safe="")+"&filter[platform]=IOS&limit=200"):
             if x.get("attributes",{}).get("identifier")==bid: return x["id"]
-        # App ID display names are stricter than bundle identifiers: Apple
-        # accepts only ASCII letters, digits, and spaces (no dots/underscores).
-        display_name=re.sub(r"[^A-Za-z0-9 ]+", " ", "Chromium "+bid)
-        display_name=" ".join(display_name.split())[:100] or "Chromium iOS"
+        # Apple App ID names are stricter than bundle identifiers: use the
+        # app/extension's own display name, not the source project name.
+        display_name=re.sub(r"[^A-Za-z0-9 ]+", " ", display_name or bid.rsplit(".",1)[-1])
+        display_name=" ".join(display_name.split())[:100] or bid.rsplit(".",1)[-1][:100]
         x=self.req("POST","/bundleIds",json={"data":{"type":"bundleIds","attributes":{"identifier":bid,"name":display_name,"platform":"IOS"}}})
-        print("Created App ID:",bid); return x["data"]["id"]
-    def ensure_capability(self,bundle_id_id,capability):
-        # Apple does not allow the generic collection `limit` parameter on this relationship endpoint.
+        print(f"Created App ID: {bid} (name: {display_name})"); return x["data"]["id"]
+    def ensure_capability(self,bundle_id_id,capability,identifier):
+        # Apple-managed capabilities must be requested by the Account Holder
+        # in the Developer portal before they can be enabled. The API reports
+        # these as forbidden; skip them so unrelated signing work can continue.
         current=self.pages(f"/bundleIds/{bundle_id_id}/bundleIdCapabilities")
         if any(x.get("attributes",{}).get("capabilityType")==capability for x in current):
             print(f"Capability already enabled: {capability}")
-            return
-        self.req("POST","/bundleIdCapabilities",json={"data":{"type":"bundleIdCapabilities","attributes":{"capabilityType":capability},"relationships":{"bundleId":{"data":{"type":"bundleIds","id":bundle_id_id}}}}})
+            return True
+        try:
+            self.req("POST","/bundleIdCapabilities",json={"data":{"type":"bundleIdCapabilities","attributes":{"capabilityType":capability},"relationships":{"bundleId":{"data":{"type":"bundleIds","id":bundle_id_id}}}}})
+        except RuntimeError as error:
+            detail=str(error)
+            if "HTTP 403" in detail or "HTTP 409" in detail:
+                print(f"::warning::Skipping {capability} for {identifier}: Apple rejected automatic enablement ({detail}). If this is a managed capability, the Account Holder must request/obtain approval in Certificates, Identifiers & Profiles → Capability Requests, then enable it under Capabilities. Signing will continue without this entitlement if the profile does not authorize it.")
+                return False
+            raise
         print(f"Enabled capability: {capability}")
+        return True
     def certs(self,certificate_type):
         # Do not request/require the undocumented "activated" field: the
         # Certificates API may omit it even for a valid current certificate.
@@ -239,6 +249,15 @@ def read_source_entitlements(bundle):
 def capabilities_for_entitlements(entitlements):
     return sorted({capability for key,capability in ENTITLEMENT_CAPABILITIES.items() if key in entitlements})
 
+def display_name_for_bundle(bundle):
+    """Return a human-facing App ID name from the bundle's own metadata."""
+    info=plistlib.loads((bundle/"Info.plist").read_bytes())
+    candidates=(info.get("CFBundleDisplayName"),info.get("CFBundleName"),info.get("CFBundleExecutable"))
+    for candidate in candidates:
+        if isinstance(candidate,str) and candidate.strip():
+            return candidate.strip()
+    return bid(bundle).rsplit(".",1)[-1]
+
 def _profile_value_allows(allowed, requested):
     """Check the profile allowlist, including Apple's string wildcards."""
     if isinstance(requested,str):
@@ -272,8 +291,9 @@ def _rewrite_entitlement_value(value, old_prefix, new_prefix):
         return {key:_rewrite_entitlement_value(item,old_prefix,new_prefix) for key,item in value.items()}
     return value
 
-def build_signing_entitlements(requested, allowed, identifier, team_id, expected_get_task_allow):
-    """Claim only source-requested entitlements after validating them against the profile."""
+def build_signing_entitlements(requested, allowed, identifier, team_id, expected_get_task_allow, skipped_entitlements=None):
+    """Claim authorized source entitlements; omit capabilities Apple requires the team to request."""
+    skipped_entitlements=skipped_entitlements or set()
     app_identifier=allowed.get("application-identifier","")
     prefix=app_identifier.split(".",1)[0]
     if not prefix:
@@ -286,6 +306,9 @@ def build_signing_entitlements(requested, allowed, identifier, team_id, expected
     result={}
     for key,value in requested.items():
         if key in ("application-identifier","com.apple.developer.team-identifier","get-task-allow"):
+            continue
+        if key in skipped_entitlements:
+            print(f"::warning::Omitting {key} from {identifier}: Apple did not authorize its managed capability for this App ID. The related app feature may be unavailable until the Account Holder requests/receives approval and a new profile is generated.")
             continue
         normalized=_rewrite_entitlement_value(value,source_prefix,prefix)
         # APNs uses a signing-mode-specific environment; the generated profile
@@ -309,7 +332,7 @@ def profile_plist(path,work):
     raw=run("security","cms","-D","-i",str(path),capture=True)
     return plistlib.loads(raw.encode())
 
-def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_task_allow,source_entitlements):
+def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_task_allow,source_entitlements,skipped_entitlements=None):
     data=profile_plist(profile,work); allowed=data.get("Entitlements",{})
     identifier=bid(bundle); appid=allowed.get("application-identifier","")
     prefix=appid.split(".",1)[0]
@@ -337,7 +360,7 @@ def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_
     profile_cert_hashes={hashlib.sha1(cert).hexdigest().upper() for cert in certs}
     if identity_sha1 not in profile_cert_hashes:
         raise RuntimeError(f"Provisioning profile for {identifier} does not contain the distribution certificate used to sign it (SHA-1 {identity_sha1}).")
-    ent=build_signing_entitlements(source_entitlements,allowed,identifier,team_id,expected_get_task_allow)
+    ent=build_signing_entitlements(source_entitlements,allowed,identifier,team_id,expected_get_task_allow,skipped_entitlements)
     if allowed.get(EVA) is not True:
         print(f"::warning::Profile for {identifier} does not authorize {EVA}; signature will be valid only for allowed entitlements and the known startup crash may remain.")
     if identifier.startswith("com.tling0001.chrome"):
@@ -387,6 +410,7 @@ def main():
     # Capture source app/extension entitlement requests before rewriting IDs
     # or replacing any existing signatures.
     source_entitlements_by_original={bid(bundle):read_source_entitlements(bundle) for bundle in bundles}
+    display_names_by_original={bid(bundle):display_name_for_bundle(bundle) for bundle in bundles}
 
     # The .tling suffix creates team-specific explicit identifiers even when
     # the source IPA uses upstream Chromium bundle IDs.
@@ -489,8 +513,10 @@ def main():
 
     profile_dir=work/"profiles"; profile_dir.mkdir(exist_ok=True)
     source_entitlements_by_updated={rewritten[original]:values for original,values in source_entitlements_by_original.items()}
+    display_names_by_updated={rewritten[original]:value for original,value in display_names_by_original.items()}
+    skipped_entitlements_by_bundle={}
     for bundle in bundles:
-        identifier=bid(bundle); app_id=apple.appid(identifier)
+        identifier=bid(bundle); app_id=apple.appid(identifier,display_names_by_updated.get(identifier,identifier.rsplit(".",1)[-1]))
         requested=source_entitlements_by_updated.get(identifier,{})
         if is_reynard and bundle == root and "com.apple.developer.kernel.increased-memory-limit" not in requested:
             # Reynard's upstream 0.22.x build declares this requirement in its
@@ -504,14 +530,22 @@ def main():
         if detected_capabilities:
             capability_list=", ".join(detected_capabilities)
             print(f"Entitlement capability requests for {identifier}: {capability_list}")
+        skipped_capabilities=set()
         for capability in detected_capabilities:
-            apple.ensure_capability(app_id,capability)
+            if not apple.ensure_capability(app_id,capability,identifier):
+                skipped_capabilities.add(capability)
+        skipped_entitlements_by_bundle[identifier]={
+            key for key,capability in ENTITLEMENT_CAPABILITIES.items()
+            if key in requested and capability in skipped_capabilities
+        }
         # Preserve the known Chromium integrations even when an upstream
         # unsigned IPA omitted its original entitlement metadata.
         if is_chromium:
-            apple.ensure_capability(app_id,"APP_GROUPS")
+            if not apple.ensure_capability(app_id,"APP_GROUPS",identifier):
+                skipped_entitlements_by_bundle.setdefault(identifier,set()).add("com.apple.security.application-groups")
             if bundle == root or identifier.endswith(".CredentialProviderExtension"):
-                apple.ensure_capability(app_id,"AUTOFILL_CREDENTIAL_PROVIDER")
+                if not apple.ensure_capability(app_id,"AUTOFILL_CREDENTIAL_PROVIDER",identifier):
+                    skipped_entitlements_by_bundle.setdefault(identifier,set()).add("com.apple.developer.authentication-services.autofill-credential-provider")
         unmapped=sorted(key for key in requested if key not in ENTITLEMENT_CAPABILITIES and key not in {
             "application-identifier","com.apple.developer.team-identifier","get-task-allow",
             "keychain-access-groups"
@@ -521,7 +555,8 @@ def main():
         filename=re.sub(r"[^A-Za-z0-9_.-]","_",identifier)+".mobileprovision"
         profile=profile_dir/filename
         profile_label="Development" if mode=="development" else "Ad Hoc"
-        data=apple.profile("Chromium "+profile_label+" "+identifier,app_id,cert_id,[d["id"] for d in enabled],profile,profile_type)
+        app_name=display_names_by_updated.get(identifier,identifier.rsplit(".",1)[-1])
+        data=apple.profile(app_name+" "+profile_label,app_id,cert_id,[d["id"] for d in enabled],profile,profile_type)
         print(f"Created {profile_label} profile for {identifier} ({data.get('id')}).")
         if is_reynard and bundle == root:
             profile_entitlements=profile_plist(profile,work).get("Entitlements",{})
@@ -552,7 +587,8 @@ def main():
     # exact entitlements authorized by their matching Ad Hoc profiles.
     for bundle in bundles:
         profile=profile_dir/(re.sub(r"[^A-Za-z0-9_.-]","_",bid(bundle))+".mobileprovision")
-        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id,expected_get_task_allow,source_entitlements_by_updated.get(bid(bundle),{}))
+        identifier=bid(bundle)
+        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id,expected_get_task_allow,source_entitlements_by_updated.get(identifier,{}),skipped_entitlements_by_bundle.get(identifier,set()))
 
     # Verify each Mach-O independently after its containing bundles have been
     # signed, then verify the complete app seal recursively.
