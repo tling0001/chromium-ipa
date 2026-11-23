@@ -98,6 +98,19 @@ jobs:
               ]
               icon_path = min(icon_candidates, key=lambda n: (n.count("/"), len(n))) if icon_candidates else None
               icon_bytes = z.read(icon_path) if icon_path else None
+              if icon_bytes:
+                  # Reject mislabeled/truncated assets before publishing them
+                  # as app-icon.png; browsers otherwise show a broken-image glyph.
+                  valid_png = (
+                      len(icon_bytes) >= 24
+                      and icon_bytes[:8] == b"\\x89PNG\\r\\n\\x1a\\n"
+                      and icon_bytes[12:16] == b"IHDR"
+                      and int.from_bytes(icon_bytes[16:20], "big") > 0
+                      and int.from_bytes(icon_bytes[20:24], "big") > 0
+                  )
+                  if not valid_png:
+                      print(f"::warning::Ignoring invalid PNG app icon at {icon_path}.")
+                      icon_bytes = None
               localized_info = {}
               for locale in ("en.lproj", "Base.lproj"):
                   localized_path = f"{app_dir}/{locale}/InfoPlist.strings"
