@@ -18,6 +18,11 @@ on:
         type: choice
         default: development
         options: [development, adhoc]
+      custom_main_bundle_id:
+        description: Optional exact main app bundle ID; when set, .tling is not appended
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -67,6 +72,7 @@ jobs:
           GH_SECRETS_TOKEN: ${{ secrets.GH_SECRETS_TOKEN }}
           APPLE_AUTO_SIGNING_DEV_P12_BASE64: ${{ secrets.APPLE_AUTO_SIGNING_DEV_P12_BASE64 }}
           APPLE_AUTO_SIGNING_DEV_P12_PASSWORD: ${{ secrets.APPLE_AUTO_SIGNING_DEV_P12_PASSWORD }}
+          CUSTOM_MAIN_BUNDLE_ID: ${{ inputs.custom_main_bundle_id }}
         run: |
           set -euo pipefail
           python scripts/apple_sign_ipa.py release/input.ipa release/signed.ipa "$SIGNING_MODE"
@@ -74,6 +80,8 @@ jobs:
       - name: Read signed app metadata and create OTA manifest
         id: metadata
         shell: bash
+        env:
+          CUSTOM_MAIN_BUNDLE_ID: ${{ inputs.custom_main_bundle_id }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -138,7 +146,13 @@ jobs:
           version = str(info.get("CFBundleShortVersionString") or info.get("CFBundleVersion") or "").strip()
           if not bundle_id or not version:
               raise SystemExit("The signed IPA is missing CFBundleIdentifier or app version metadata.")
-          if not bundle_id.endswith(".tling") or bundle_id.removesuffix(".tling").endswith(".tling"):
+          custom_bundle_id = os.environ.get("CUSTOM_MAIN_BUNDLE_ID", "").strip()
+          if custom_bundle_id:
+              if bundle_id != custom_bundle_id:
+                  raise SystemExit(
+                      f"Signed main bundle ID '{bundle_id}' does not match requested custom ID '{custom_bundle_id}'."
+                  )
+          elif not bundle_id.endswith(".tling") or bundle_id.removesuffix(".tling").endswith(".tling"):
               raise SystemExit(f"Bundle ID '{bundle_id}' must end in exactly one .tling suffix after signing.")
 
           release_name = f"{bundle_id} - {version}"
