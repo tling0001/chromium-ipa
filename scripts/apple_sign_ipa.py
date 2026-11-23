@@ -317,6 +317,23 @@ def normalized_root_bundle_id(identifier):
         base="com.tling0001."+base[len("com.apple."):]
     return base+".tling"
 
+def resolve_root_bundle_id(source_identifier, custom_identifier=""):
+    """Use a caller-supplied explicit App ID verbatim, or the default .tling ID."""
+    custom_identifier=custom_identifier.strip()
+    if not custom_identifier:
+        return normalized_root_bundle_id(source_identifier)
+    parts=custom_identifier.split(".")
+    if (len(parts)<2 or len(custom_identifier)>255
+            or any(not re.fullmatch(r"[A-Za-z0-9-]{1,63}", part) for part in parts)
+            or any(part.startswith("-") or part.endswith("-") for part in parts)):
+        raise RuntimeError(
+            f"Custom main bundle ID {custom_identifier!r} is invalid. "
+            "Use a reverse-DNS identifier such as com.example.myapp."
+        )
+    if custom_identifier=="com.apple" or custom_identifier.startswith("com.apple."):
+        raise RuntimeError("Custom main bundle IDs cannot use Apple's reserved com.apple namespace.")
+    return custom_identifier
+
 def is_macho(path):
     """Identify Mach-O code by its file type, not by its filename extension."""
     if path.is_symlink() or not path.is_file():
@@ -605,7 +622,10 @@ def main():
     # This makes re-signing an already processed IPA idempotent and repairs
     # artifacts produced by older runs that appended the namespace repeatedly.
     root_base=re.sub(r"(?:\.tling)+$", "", root_original)
-    root_updated=normalized_root_bundle_id(root_original)
+    custom_main_bundle_id=env("CUSTOM_MAIN_BUNDLE_ID")
+    root_updated=resolve_root_bundle_id(root_original,custom_main_bundle_id)
+    if custom_main_bundle_id:
+        print(f"Using custom main app bundle identifier without adding .tling: {root_updated}")
     is_chromium=root_base.startswith("com.tling0001.chrome")
     is_reynard=(root_base=="com.minh-ton.Reynard")
     if root_updated != root_original:
