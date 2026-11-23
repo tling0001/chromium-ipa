@@ -21,8 +21,8 @@ class EntitlementSigningTests(unittest.TestCase):
                 self.posted = False
             def pages(self, path):
                 return [
-                    {"id": "older", "attributes": {"name": "Gboard Development [com.example.gboard.tling]"}},
-                    {"id": "newer", "attributes": {"name": "Gboard Development [com.example.gboard.tling]"}},
+                    {"id": "older", "attributes": {"name": "Gboard Development [bundle-id]"}},
+                    {"id": "newer", "attributes": {"name": "Gboard Development [bundle-id]"}},
                 ]
             def req(self, method, path, **kwargs):
                 if method == "GET":
@@ -63,6 +63,7 @@ class EntitlementSigningTests(unittest.TestCase):
             self.assertEqual(apple.deleted, [])
 
     def test_profile_name_is_scoped_to_bundle_identifier(self):
+        import tempfile
         class FakeApple(signer.Apple):
             def __init__(self):
                 self.payload = None
@@ -79,7 +80,7 @@ class EntitlementSigningTests(unittest.TestCase):
                           "IOS_APP_DEVELOPMENT")
         self.assertEqual(
             apple.payload["data"]["attributes"]["name"],
-            "Gboard Development [com.example.gboard.tling]",
+            "Gboard Development [bundle-id]",
         )
 
     def test_subprocess_capture_replaces_non_utf8_bytes(self):
