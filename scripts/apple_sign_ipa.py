@@ -13,6 +13,25 @@ PASS_SECRET = "APPLE_AUTO_SIGNING_P12_PASSWORD"
 DEV_P12_SECRET = "APPLE_AUTO_SIGNING_DEV_P12_BASE64"
 DEV_PASS_SECRET = "APPLE_AUTO_SIGNING_DEV_P12_PASSWORD"
 EVA = "com.apple.developer.kernel.extended-virtual-addressing"
+# Only capabilities explicitly represented by Apple's public App Store Connect API
+# are auto-enabled. Entitlements outside this map may be managed/approval-only.
+ENTITLEMENT_CAPABILITIES = {
+    "aps-environment": "PUSH_NOTIFICATIONS",
+    "com.apple.developer.associated-domains": "ASSOCIATED_DOMAINS",
+    "com.apple.security.application-groups": "APP_GROUPS",
+    "com.apple.developer.healthkit": "HEALTHKIT",
+    "com.apple.developer.homekit": "HOMEKIT",
+    "com.apple.developer.siri": "SIRIKIT",
+    "com.apple.developer.classkit-environment": "CLASSKIT",
+    "com.apple.developer.networking.networkextension": "NETWORK_EXTENSIONS",
+    "com.apple.developer.networking.multipath": "MULTIPATH",
+    "com.apple.developer.nfc.readersession.formats": "NFC_TAG_READING",
+    "com.apple.developer.applesignin": "APPLE_ID_AUTH",
+    "com.apple.developer.icloud-container-identifiers": "ICLOUD",
+    "com.apple.developer.ubiquity-container-identifiers": "ICLOUD",
+    "com.apple.developer.in-app-payments": "APPLE_PAY",
+    "com.apple.developer.authentication-services.autofill-credential-provider": "AUTOFILL_CREDENTIAL_PROVIDER",
+}
 
 def env(k, default=""): return os.environ.get(k, default).strip()
 def run(*args, capture=False):
@@ -156,11 +175,116 @@ def is_macho(path):
     description=run("file","-b",str(path),capture=True)
     return "Mach-O" in description
 
+def _load_entitlement_plist(raw):
+    try:
+        value=plistlib.loads(raw)
+    except Exception:
+        return None
+    if isinstance(value,dict) and isinstance(value.get("Entitlements"),dict):
+        value=value["Entitlements"]
+    return value if isinstance(value,dict) else None
+
+def read_source_entitlements(bundle):
+    """Read entitlements from the IPA's existing signature or packaged build metadata."""
+    command=subprocess.run(
+        ["codesign","-d","--entitlements",":-","--xml",str(bundle)],
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE
+    )
+    for stream in (command.stdout,command.stderr):
+        parsed=_load_entitlement_plist(stream)
+        if parsed is not None:
+            print(f"Read {len(parsed)} source entitlement(s) from signature: {bundle.name}")
+            return parsed
+    candidates=[]
+    for pattern in ("*.entitlements","*.xcent","archived-expanded-entitlements.xcent"):
+        candidates.extend(p for p in bundle.rglob(pattern) if p.is_file())
+    parsed_candidates=[]
+    for path in sorted(set(candidates)):
+        try:
+            parsed=_load_entitlement_plist(path.read_bytes())
+        except OSError:
+            parsed=None
+        if parsed is not None:
+            parsed_candidates.append((path,parsed))
+    if len(parsed_candidates)>1:
+        first=parsed_candidates[0][1]
+        if any(value != first for _,value in parsed_candidates[1:]):
+            names=", ".join(str(path.relative_to(bundle)) for path,_ in parsed_candidates)
+            raise RuntimeError(f"Conflicting packaged entitlement files in {bundle}: {names}")
+    if parsed_candidates:
+        path,parsed=parsed_candidates[0]
+        print(f"Read {len(parsed)} source entitlement(s) from packaged metadata: {path.relative_to(bundle)}")
+        return parsed
+    print(f"::notice::No source entitlements were present in {bundle.name}. This IPA does not carry enough metadata to infer its original Xcode entitlements; only capabilities already assigned to the App ID can appear in the generated profile.")
+    return {}
+
+def capabilities_for_entitlements(entitlements):
+    return sorted({capability for key,capability in ENTITLEMENT_CAPABILITIES.items() if key in entitlements})
+
+def _profile_value_allows(allowed, requested):
+    """Check the profile allowlist, including Apple's string wildcards."""
+    if isinstance(requested,str):
+        if not isinstance(allowed,str):
+            return False
+        if allowed == requested:
+            return True
+        return allowed.endswith("*") and requested.startswith(allowed[:-1])
+    if isinstance(requested,bool) or requested is None or isinstance(requested,(int,float)):
+        return type(allowed) is type(requested) and allowed == requested
+    if isinstance(requested,list):
+        if not isinstance(allowed,list):
+            return False
+        return all(any(_profile_value_allows(candidate,item) for candidate in allowed) for item in requested)
+    if isinstance(requested,dict):
+        if not isinstance(allowed,dict):
+            return False
+        return all(key in allowed and _profile_value_allows(allowed[key],value) for key,value in requested.items())
+    return False
+
+def _rewrite_entitlement_value(value, old_prefix, new_prefix):
+    if isinstance(value,str):
+        value=value.replace("$(AppIdentifierPrefix)",new_prefix+".")
+        value=value.replace("$(TeamIdentifierPrefix)",new_prefix+".")
+        if old_prefix and value.startswith(old_prefix+"."):
+            value=new_prefix+value[len(old_prefix):]
+        return value
+    if isinstance(value,list):
+        return [_rewrite_entitlement_value(item,old_prefix,new_prefix) for item in value]
+    if isinstance(value,dict):
+        return {key:_rewrite_entitlement_value(item,old_prefix,new_prefix) for key,item in value.items()}
+    return value
+
+def build_signing_entitlements(requested, allowed, identifier, team_id, expected_get_task_allow):
+    """Claim only source-requested entitlements after validating them against the profile."""
+    app_identifier=allowed.get("application-identifier","")
+    prefix=app_identifier.split(".",1)[0]
+    if not prefix:
+        raise RuntimeError(f"Provisioning profile for {identifier} has no application-identifier.")
+    source_app_id=requested.get("application-identifier","")
+    source_prefix=source_app_id.split(".",1)[0] if isinstance(source_app_id,str) else ""
+    result={}
+    for key,value in requested.items():
+        if key in ("application-identifier","com.apple.developer.team-identifier","get-task-allow"):
+            continue
+        normalized=_rewrite_entitlement_value(value,source_prefix,prefix)
+        if key not in allowed or not _profile_value_allows(allowed[key],normalized):
+            raise RuntimeError(
+                f"Required source entitlement {key!r}={normalized!r} for {identifier} "
+                "is not authorized by its generated provisioning profile. Enable/request "
+                "the capability for this App ID (or obtain Apple's approval for a managed entitlement), "
+                "then rerun signing. The signer will not silently drop it."
+            )
+        result[key]=normalized
+    result["application-identifier"]=prefix+"."+identifier
+    result["com.apple.developer.team-identifier"]=team_id
+    result["get-task-allow"]=expected_get_task_allow
+    return result
+
 def profile_plist(path,work):
     raw=run("security","cms","-D","-i",str(path),capture=True)
     return plistlib.loads(raw.encode())
 
-def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_task_allow):
+def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_task_allow,source_entitlements):
     data=profile_plist(profile,work); allowed=data.get("Entitlements",{})
     identifier=bid(bundle); appid=allowed.get("application-identifier","")
     prefix=appid.split(".",1)[0]
@@ -188,10 +312,7 @@ def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_
     profile_cert_hashes={hashlib.sha1(cert).hexdigest().upper() for cert in certs}
     if identity_sha1 not in profile_cert_hashes:
         raise RuntimeError(f"Provisioning profile for {identifier} does not contain the distribution certificate used to sign it (SHA-1 {identity_sha1}).")
-    ent=dict(allowed); ent["application-identifier"]=prefix+"."+identifier
-    if "com.apple.developer.team-identifier" in ent: ent["com.apple.developer.team-identifier"]=team_id
-    if "keychain-access-groups" in ent:
-        ent["keychain-access-groups"]=[x.replace("$(AppIdentifierPrefix)",prefix+".") for x in ent["keychain-access-groups"]]
+    ent=build_signing_entitlements(source_entitlements,allowed,identifier,team_id,expected_get_task_allow)
     if allowed.get(EVA) is not True:
         print(f"::warning::Profile for {identifier} does not authorize {EVA}; signature will be valid only for allowed entitlements and the known startup crash may remain.")
     if identifier.startswith("com.tling0001.chrome"):
@@ -237,6 +358,10 @@ def main():
     root=roots[0]
     bundles=[p for p in root.rglob("*") if p.is_dir() and p.suffix in (".app",".appex")]+[root]
     bundles=sorted(set(bundles),key=lambda p:len(p.parts),reverse=True)
+
+    # Capture source app/extension entitlement requests before rewriting IDs
+    # or replacing any existing signatures.
+    source_entitlements_by_original={bid(bundle):read_source_entitlements(bundle) for bundle in bundles}
 
     # The .tling suffix creates team-specific explicit identifiers even when
     # the source IPA uses upstream Chromium bundle IDs.
@@ -338,13 +463,24 @@ def main():
         raise RuntimeError("Could not determine Apple Team ID from the signing certificate.")
 
     profile_dir=work/"profiles"; profile_dir.mkdir(exist_ok=True)
+    source_entitlements_by_updated={rewritten[original]:values for original,values in source_entitlements_by_original.items()}
     for bundle in bundles:
         identifier=bid(bundle); app_id=apple.appid(identifier)
-        # Chromium-specific capabilities must not be imposed on unrelated apps.
+        requested=source_entitlements_by_updated.get(identifier,{})
+        for capability in capabilities_for_entitlements(requested):
+            apple.ensure_capability(app_id,capability)
+        # Preserve the known Chromium integrations even when an upstream
+        # unsigned IPA omitted its original entitlement metadata.
         if is_chromium:
             apple.ensure_capability(app_id,"APP_GROUPS")
             if bundle == root or identifier.endswith(".CredentialProviderExtension"):
                 apple.ensure_capability(app_id,"AUTOFILL_CREDENTIAL_PROVIDER")
+        unmapped=sorted(key for key in requested if key not in ENTITLEMENT_CAPABILITIES and key not in {
+            "application-identifier","com.apple.developer.team-identifier","get-task-allow",
+            "keychain-access-groups"
+        })
+        for key in unmapped:
+            print(f"::notice::Source entitlement {key!r} has no automatic App Store Connect capability mapping. The profile will be checked for authorization; managed/custom entitlements may require prior Apple approval or manual portal configuration.")
         filename=re.sub(r"[^A-Za-z0-9_.-]","_",identifier)+".mobileprovision"
         profile=profile_dir/filename
         profile_label="Development" if mode=="development" else "Ad Hoc"
@@ -379,7 +515,7 @@ def main():
     # exact entitlements authorized by their matching Ad Hoc profiles.
     for bundle in bundles:
         profile=profile_dir/(re.sub(r"[^A-Za-z0-9_.-]","_",bid(bundle))+".mobileprovision")
-        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id,expected_get_task_allow)
+        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id,expected_get_task_allow,source_entitlements_by_updated.get(bid(bundle),{}))
 
     # Verify each Mach-O independently after its containing bundles have been
     # signed, then verify the complete app seal recursively.
