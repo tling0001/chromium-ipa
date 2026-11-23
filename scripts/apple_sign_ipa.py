@@ -115,8 +115,18 @@ class Apple:
         if any(x.get("attributes",{}).get("capabilityType")==capability for x in current):
             print(f"Capability already enabled: {capability}")
             return True
+        # Sign in with Apple cannot be enabled without choosing its App ID
+        # grouping configuration. For a newly enabled standalone app, make it
+        # a primary App ID (the default Xcode/Developer portal configuration).
+        # Apple rejects a bare APPLE_ID_AUTH capability request with HTTP 409.
+        attributes={"capabilityType":capability}
+        if capability=="APPLE_ID_AUTH":
+            attributes["settings"]=[{
+                "key":"APPLE_ID_AUTH_APP_CONSENT",
+                "options":[{"key":"PRIMARY_APP_CONSENT"}],
+            }]
         try:
-            self.req("POST","/bundleIdCapabilities",json={"data":{"type":"bundleIdCapabilities","attributes":{"capabilityType":capability},"relationships":{"bundleId":{"data":{"type":"bundleIds","id":bundle_id_id}}}}})
+            self.req("POST","/bundleIdCapabilities",json={"data":{"type":"bundleIdCapabilities","attributes":attributes,"relationships":{"bundleId":{"data":{"type":"bundleIds","id":bundle_id_id}}}}})
         except RuntimeError as error:
             detail=str(error)
             if is_managed_capability_request_error(error):
