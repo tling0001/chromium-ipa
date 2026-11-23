@@ -21,7 +21,7 @@ class EntitlementSigningTests(unittest.TestCase):
                 self.posted = False
             def pages(self, path):
                 return [
-                    {"id": "older", "attributes": {"name": "Gboard Development [bundle-id]"}},
+                    {"id": "older", "attributes": {"name": "Gboard Development [com.example.gboard.tling]"}},
                     {"id": "newer", "attributes": {"name": "Gboard Development [bundle-id]"}},
                 ]
             def req(self, method, path, **kwargs):
