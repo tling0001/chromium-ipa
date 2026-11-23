@@ -80,7 +80,7 @@ class EntitlementSigningTests(unittest.TestCase):
                           "IOS_APP_DEVELOPMENT")
         self.assertEqual(
             apple.payload["data"]["attributes"]["name"],
-            "Gboard Development [bundle-id]",
+            "Gboard Development [com.example.gboard.tling]",
         )
 
     def test_subprocess_capture_replaces_non_utf8_bytes(self):
