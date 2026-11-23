@@ -28,6 +28,17 @@ class EntitlementSigningTests(unittest.TestCase):
         )
         self.assertEqual(signer.sanitize_app_id_name("", "com.example.Reader"), "Reader")
 
+    def test_managed_capability_request_errors_are_skipped(self):
+        self.assertTrue(signer.is_managed_capability_request_error(
+            RuntimeError("Apple API POST returned HTTP 403: forbidden")
+        ))
+        self.assertTrue(signer.is_managed_capability_request_error(
+            RuntimeError("Apple API error: this capability must be requested")
+        ))
+        self.assertFalse(signer.is_managed_capability_request_error(
+            RuntimeError("Apple API POST returned HTTP 500: internal server error")
+        ))
+
     def test_skipped_managed_capability_is_not_claimed(self):
         requested = {
             "com.apple.developer.family-controls": True,
@@ -37,6 +48,7 @@ class EntitlementSigningTests(unittest.TestCase):
             "application-identifier": "NEWTEAM.com.example.app",
             "com.apple.developer.team-identifier": "NEWTEAM",
             "get-task-allow": True,
+            "com.apple.developer.family-controls": True,
         }
         result = signer.build_signing_entitlements(
             requested,
