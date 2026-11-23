@@ -1,6 +1,7 @@
 import importlib.util
 import pathlib
 import unittest
+from unittest import mock
 
 MODULE_PATH = pathlib.Path(__file__).parents[1] / "scripts" / "apple_sign_ipa.py"
 SPEC = importlib.util.spec_from_file_location("apple_sign_ipa", MODULE_PATH)
@@ -9,6 +10,15 @@ SPEC.loader.exec_module(signer)
 
 
 class EntitlementSigningTests(unittest.TestCase):
+    def test_subprocess_capture_replaces_non_utf8_bytes(self):
+        completed = mock.Mock(stdout="Mach-O executable �")
+        with mock.patch.object(signer.subprocess, "run", return_value=completed) as run_mock:
+            output = signer.run("file", "-b", "café", capture=True)
+        self.assertEqual(output, "Mach-O executable �")
+        self.assertEqual(run_mock.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(run_mock.call_args.kwargs["errors"], "replace")
+        self.assertTrue(run_mock.call_args.kwargs["text"])
+
     def test_maps_supported_entitlements_to_capabilities(self):
         requested = {
             "aps-environment": "development",
