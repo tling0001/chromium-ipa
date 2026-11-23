@@ -10,6 +10,78 @@ SPEC.loader.exec_module(signer)
 
 
 class EntitlementSigningTests(unittest.TestCase):
+    def test_profile_reuses_newest_active_matching_profile(self):
+        import base64
+        import tempfile
+        from datetime import datetime, timedelta, timezone
+
+        class FakeApple(signer.Apple):
+            def __init__(self):
+                self.deleted = []
+                self.posted = False
+            def pages(self, path):
+                return [
+                    {"id": "older", "attributes": {"name": "Gboard Development [com.example.gboard.tling]"}},
+                    {"id": "newer", "attributes": {"name": "Gboard Development [com.example.gboard.tling]"}},
+                ]
+            def req(self, method, path, **kwargs):
+                if method == "GET":
+                    pid = path.split("/")[2].split("?")[0]
+                    created = "2026-01-01T00:00:00Z" if pid == "older" else "2026-02-01T00:00:00Z"
+                    return {"data": {
+                        "id": pid,
+                        "attributes": {
+                            "createdDate": created,
+                            "profileState": "ACTIVE",
+                            "expirationDate": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
+                            "profileContent": base64.b64encode(b"newest-profile" if pid == "newer" else b"older-profile").decode(),
+                        },
+                        "relationships": {
+                            "bundleId": {"data": {"id": "bundle-id"}},
+                            "certificates": {"data": [{"id": "cert-id"}]},
+                            "devices": {"data": [{"id": "device-1"}, {"id": "device-2"}]},
+                        },
+                    }}
+                if method == "DELETE":
+                    self.deleted.append(path)
+                    return {}
+                if method == "POST":
+                    self.posted = True
+                    raise AssertionError("A matching active profile should be reused")
+                raise AssertionError(method)
+
+        apple = FakeApple()
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "profile.mobileprovision"
+            result = apple.profile(
+                "Gboard Development", "bundle-id", "cert-id",
+                ["device-1", "device-2"], output, "IOS_APP_DEVELOPMENT",
+            )
+            self.assertEqual(result["id"], "newer")
+            self.assertEqual(output.read_bytes(), b"newest-profile")
+            self.assertFalse(apple.posted)
+            self.assertEqual(apple.deleted, [])
+
+    def test_profile_name_is_scoped_to_bundle_identifier(self):
+        class FakeApple(signer.Apple):
+            def __init__(self):
+                self.payload = None
+            def pages(self, path):
+                return []
+            def req(self, method, path, **kwargs):
+                self.payload = kwargs["json"]
+                return {"data": {"id": "profile-id", "attributes": {"profileContent": ""}}}
+
+        apple = FakeApple()
+        with tempfile.TemporaryDirectory() as directory:
+            apple.profile("Gboard Development", "com.example.gboard.tling", "cert-id",
+                          ["device-1"], pathlib.Path(directory) / "profile.mobileprovision",
+                          "IOS_APP_DEVELOPMENT")
+        self.assertEqual(
+            apple.payload["data"]["attributes"]["name"],
+            "Gboard Development [com.example.gboard.tling]",
+        )
+
     def test_subprocess_capture_replaces_non_utf8_bytes(self):
         completed = mock.Mock(stdout="Mach-O executable �")
         with mock.patch.object(signer.subprocess, "run", return_value=completed) as run_mock:
