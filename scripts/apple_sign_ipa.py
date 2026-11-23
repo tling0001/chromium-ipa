@@ -208,7 +208,14 @@ def read_source_entitlements(bundle):
             return parsed
     candidates=[]
     for pattern in ("*.entitlements","*.xcent","archived-expanded-entitlements.xcent"):
-        candidates.extend(p for p in bundle.rglob(pattern) if p.is_file())
+        for path in bundle.rglob(pattern):
+            if not path.is_file():
+                continue
+            # A parent .app must not consume an embedded extension's
+            # entitlements; each executable bundle is inspected separately.
+            nested_bundle=any(parent != bundle and parent.suffix in (".app",".appex") for parent in path.parents)
+            if not nested_bundle:
+                candidates.append(path)
     parsed_candidates=[]
     for path in sorted(set(candidates)):
         try:
