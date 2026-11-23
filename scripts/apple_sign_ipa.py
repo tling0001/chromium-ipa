@@ -193,7 +193,7 @@ def read_source_entitlements(bundle):
     for stream in (command.stdout,command.stderr):
         parsed=_load_entitlement_plist(stream)
         if parsed is not None:
-            print(f"Read {len(parsed)} source entitlement(s) from signature: {bundle.name}")
+            print(f"Read {len(parsed)} source entitlement(s) from signature: {bundle.name}: {\", \".join(sorted(parsed))}")
             return parsed
     candidates=[]
     for pattern in ("*.entitlements","*.xcent","archived-expanded-entitlements.xcent"):
@@ -213,7 +213,7 @@ def read_source_entitlements(bundle):
             raise RuntimeError(f"Conflicting packaged entitlement files in {bundle}: {names}")
     if parsed_candidates:
         path,parsed=parsed_candidates[0]
-        print(f"Read {len(parsed)} source entitlement(s) from packaged metadata: {path.relative_to(bundle)}")
+        print(f"Read {len(parsed)} source entitlement(s) from packaged metadata: {path.relative_to(bundle)}: {\", \".join(sorted(parsed))}")
         return parsed
     print(f"::notice::No source entitlements were present in {bundle.name}. This IPA does not carry enough metadata to infer its original Xcode entitlements; only capabilities already assigned to the App ID can appear in the generated profile.")
     return {}
