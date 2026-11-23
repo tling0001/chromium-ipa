@@ -74,11 +74,16 @@ class Apple:
         return out
     def devices(self): return self.pages("/devices?filter[platform]=IOS&limit=200&fields[devices]=name,platform,udid,status")
     def appid(self,bid,display_name):
-        for x in self.pages("/bundleIds?filter[identifier]="+quote(bid,safe="")+"&filter[platform]=IOS&limit=200"):
-            if x.get("attributes",{}).get("identifier")==bid: return x["id"]
         # Apple App ID names are stricter than bundle identifiers: use the
         # app/extension's own display name, not the source project name.
         display_name=sanitize_app_id_name(display_name,bid)
+        for x in self.pages("/bundleIds?filter[identifier]="+quote(bid,safe="")+"&filter[platform]=IOS&limit=200"):
+            if x.get("attributes",{}).get("identifier")==bid:
+                current_name=x.get("attributes",{}).get("name","")
+                if current_name != display_name:
+                    self.req("PATCH",f"/bundleIds/{x['id']}",json={"data":{"type":"bundleIds","id":x["id"],"attributes":{"name":display_name}}})
+                    print(f"Renamed App ID: {bid} ({current_name!r} -> {display_name!r})")
+                return x["id"]
         x=self.req("POST","/bundleIds",json={"data":{"type":"bundleIds","attributes":{"identifier":bid,"name":display_name,"platform":"IOS"}}})
         print(f"Created App ID: {bid} (name: {display_name})"); return x["data"]["id"]
     def ensure_capability(self,bundle_id_id,capability,identifier):
