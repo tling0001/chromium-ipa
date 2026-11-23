@@ -44,7 +44,18 @@ ENTITLEMENT_CAPABILITIES = {
 
 def env(k, default=""): return os.environ.get(k, default).strip()
 def run(*args, capture=False):
-    p = subprocess.run(args, check=True, text=True, stdout=subprocess.PIPE if capture else None, stderr=subprocess.PIPE if capture else None)
+    # macOS command-line tools such as `file` may emit localized filenames
+    # using the runner's locale encoding rather than UTF-8. Keep text output
+    # readable without letting an undecodable byte abort IPA inspection.
+    p = subprocess.run(
+        args,
+        check=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.PIPE if capture else None,
+    )
     return p.stdout if capture else ""
 
 def token():
