@@ -28,6 +28,28 @@ class EntitlementSigningTests(unittest.TestCase):
         )
         self.assertEqual(signer.sanitize_app_id_name("", "com.example.Reader"), "Reader")
 
+    def test_sign_in_with_apple_capability_uses_primary_app_configuration(self):
+        class FakeApple(signer.Apple):
+            def __init__(self):
+                self.payload = None
+            def pages(self, path):
+                return []
+            def req(self, method, path, **kwargs):
+                self.payload = kwargs["json"]
+                return {"data": {"id": "capability-id"}}
+
+        apple = FakeApple()
+        self.assertTrue(apple.ensure_capability("bundle-id-id", "APPLE_ID_AUTH", "com.example.app"))
+        attributes = apple.payload["data"]["attributes"]
+        self.assertEqual(attributes["capabilityType"], "APPLE_ID_AUTH")
+        self.assertEqual(
+            attributes["settings"],
+            [{
+                "key": "APPLE_ID_AUTH_APP_CONSENT",
+                "options": [{"key": "PRIMARY_APP_CONSENT"}],
+            }],
+        )
+
     def test_managed_capability_request_errors_are_skipped(self):
         self.assertTrue(signer.is_managed_capability_request_error(
             RuntimeError("Apple API POST returned HTTP 403: forbidden")
