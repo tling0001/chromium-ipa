@@ -190,7 +190,7 @@ class Apple:
         run("openssl","pkcs12","-export","-inkey",str(key),"-in",str(cert),"-out",str(p12),"-passout","pass:"+password,"-name",f"Chromium iOS {label}")
         print(f"Created {certificate_type} certificate:",x["attributes"].get("serialNumber",""))
         return p12,password
-    def profile(self,name,bid_id,cert_id,device_ids,path,profile_type):
+    def profile(self,name,bid_id,cert_id,device_ids,path,profile_type,required_entitlements=()):
         # App Store Connect profile names are not reliably unique across App IDs.
         # Include the bundle identifier so two apps called (for example) Gboard
         # cannot collide on the shared "Gboard Development" name.
@@ -224,12 +224,22 @@ class Apple:
                 expiry=datetime.fromisoformat(expires.replace("Z","+00:00")) if expires else None
             except (TypeError,ValueError):
                 expiry=None
+            profile_content=attrs.get("profileContent")
+            try:
+                profile_entitlements=plistlib.loads(base64.b64decode(profile_content)).get("Entitlements",{}) if profile_content else {}
+            except Exception:
+                profile_entitlements={}
+            required_profile_keys=set(required_entitlements)
             if (attrs.get("profileState")=="ACTIVE" and expiry and expiry>now
                     and cert_id in certs and devices==expected_devices
-                    and attrs.get("profileContent")):
+                    and profile_content
+                    and required_profile_keys.issubset(profile_entitlements)):
                 print(f"Reusing newest active {profile_type} profile {data['id']} for {bid_id} ({name}).")
-                path.write_bytes(base64.b64decode(attrs["profileContent"]))
+                path.write_bytes(base64.b64decode(profile_content))
                 return data
+            if required_profile_keys and not required_profile_keys.issubset(profile_entitlements):
+                missing=", ".join(sorted(required_profile_keys-set(profile_entitlements)))
+                print(f"Existing profile {data['id']} is stale for current enabled capabilities (missing: {missing}); regenerating.")
         # Stale profiles for this exact App ID/name are removed before
         # regeneration. Profiles belonging to other App IDs are never touched.
         for _,data in details:
@@ -439,13 +449,40 @@ def build_signing_entitlements(requested, allowed, identifier, team_id, expected
         # is authoritative for whether this is development or production.
         if key == "aps-environment" and isinstance(allowed.get(key),str):
             normalized=allowed[key]
-        # Apple's Associated Domains profile grant can be represented as a
-        # boolean capability grant rather than echoing the app's domain list.
-        # Accept that grant; if Apple enabled the capability but did not grant
-        # it in the generated profile, omit only this managed entitlement.
-        if key == "com.apple.developer.associated-domains" and allowed.get(key) is True:
-            result[key]=normalized
-            continue
+        # URL schemes (for example sapphire://) belong in CFBundleURLTypes in
+        # Info.plist, not in the Associated Domains entitlement. Keep only
+        # Apple's supported web-domain service entries in this entitlement.
+        if key == "com.apple.developer.associated-domains":
+            source_domains=normalized if isinstance(normalized,list) else []
+            valid_domains=[]
+            invalid_domains=[]
+            for domain in source_domains:
+                if not isinstance(domain,str):
+                    invalid_domains.append(repr(domain))
+                    continue
+                candidate=domain.replace(chr(92)+".", ".")
+                if re.match(r"^(?:applinks|webcredentials|activitycontinuation|appclips):(?:\*\.)?[A-Za-z0-9.-]+(?::[0-9]+)?(?:\?.*)?$",candidate):
+                    valid_domains.append(candidate)
+                else:
+                    invalid_domains.append(domain)
+            if invalid_domains:
+                print(f"::notice::Ignoring non-domain Associated Domains entries for {identifier}: {invalid_domains!r}. Custom URL schemes remain in the app's Info.plist and do not need provisioning-profile entitlements.")
+            normalized=valid_domains
+            if not normalized:
+                continue
+            # A true profile grant authorizes the domain list. If Apple emits
+            # a concrete allowlist instead, retain only the entries it grants.
+            if allowed.get(key) is True:
+                result[key]=normalized
+                continue
+            if isinstance(allowed.get(key),list):
+                accepted=[domain for domain in normalized if any(_profile_value_allows(grant,domain) for grant in allowed[key])]
+                rejected=sorted(set(normalized)-set(accepted))
+                if rejected:
+                    print(f"::warning::Omitting Associated Domains not authorized by the generated profile for {identifier}: {rejected!r}.")
+                if accepted:
+                    result[key]=accepted
+                continue
         if key not in allowed or not _profile_value_allows(allowed[key],normalized):
             # The source IPA may request entitlements that this Apple team
             # cannot enable (including managed capabilities that are not
@@ -694,7 +731,15 @@ def main():
         profile=profile_dir/filename
         profile_label="Development" if mode=="development" else "Ad Hoc"
         app_name=display_names_by_updated.get(identifier,identifier.rsplit(".",1)[-1])
-        data=apple.profile(app_name+" "+profile_label,app_id,cert_id,[d["id"] for d in enabled],profile,profile_type)
+        required_profile_entitlements=[
+            key for key in requested
+            if key in ENTITLEMENT_CAPABILITIES
+            and key not in skipped_entitlements_by_bundle.get(identifier,set())
+        ]
+        data=apple.profile(
+            app_name+" "+profile_label,app_id,cert_id,[d["id"] for d in enabled],
+            profile,profile_type,required_profile_entitlements
+        )
         print(f"Created {profile_label} profile for {identifier} ({data.get('id')}).")
         if is_reynard and bundle == root:
             profile_entitlements=profile_plist(profile,work).get("Entitlements",{})
