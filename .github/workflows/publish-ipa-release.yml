@@ -22,10 +22,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: publish-ipa-release
-  cancel-in-progress: false
-
 jobs:
   publish:
     name: Sign and publish supplied iOS IPA
