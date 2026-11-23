@@ -488,7 +488,8 @@ def main():
         requested=source_entitlements_by_updated.get(identifier,{})
         detected_capabilities=capabilities_for_entitlements(requested)
         if detected_capabilities:
-            print(f"Entitlement capability requests for {identifier}: {\", \".join(detected_capabilities)}")
+            capability_list=", ".join(detected_capabilities)
+            print(f"Entitlement capability requests for {identifier}: {capability_list}")
         for capability in detected_capabilities:
             apple.ensure_capability(app_id,capability)
         # Preserve the known Chromium integrations even when an upstream
