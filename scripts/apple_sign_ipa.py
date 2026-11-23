@@ -218,7 +218,6 @@ def is_macho(path):
         return False
     description=run("file","-b",str(path),capture=True)
     return "Mach-O" in description
-
 def _load_entitlement_plist(raw):
     try:
         value=plistlib.loads(raw)
@@ -353,15 +352,19 @@ def build_signing_entitlements(requested, allowed, identifier, team_id, expected
             result[key]=normalized
             continue
         if key not in allowed or not _profile_value_allows(allowed[key],normalized):
-            if key == "com.apple.developer.associated-domains":
-                print(f"::warning::Omitting {key} from {identifier}: ASSOCIATED_DOMAINS could not be authorized in the generated provisioning profile. Signing will continue; Libby's universal links and web credentials may not work until the capability is approved/enabled and a new profile is generated.")
-                continue
-            raise RuntimeError(
-                f"Required source entitlement {key!r}={normalized!r} for {identifier} "
-                "is not authorized by its generated provisioning profile. Enable/request "
-                "the capability for this App ID (or obtain Apple's approval for a managed entitlement), "
-                "then rerun signing. The signer will not silently drop it."
+            # The source IPA may request entitlements that this Apple team
+            # cannot enable (including managed capabilities that are not
+            # exposed by the App Store Connect API). Never let one such
+            # optional entitlement abort signing of the whole app: omit it
+            # from the new signature and make the loss explicit in the log.
+            reason = "is absent from" if key not in allowed else "does not match"
+            print(
+                f"::warning::Omitting unsupported source entitlement {key!r}={normalized!r} "
+                f"from {identifier}: it {reason} the generated provisioning profile. "
+                "Signing will continue without this entitlement; the related app feature "
+                "may not work unless Apple grants the entitlement and a new profile is generated."
             )
+            continue
         result[key]=normalized
     result["application-identifier"]=prefix+"."+identifier
     result["com.apple.developer.team-identifier"]=team_id
@@ -437,8 +440,7 @@ def main():
     devices=apple.devices()
     enabled=[d for d in devices if d.get("attributes",{}).get("status")=="ENABLED"]
     if not enabled: raise RuntimeError("No ENABLED iOS devices registered with this Apple team.")
-    if len(enabled)>100: raise RuntimeError(f"Found {len(enabled)} enabled iOS devices; Ad Hoc profiles support at most 100.")
-    print(f"Including all {len(enabled)} enabled registered iOS devices; no UDID input is needed.")
+    if len(enabled)>100: raise RuntimeError(f"Found {len(enabled)} enabled iOS devices; Ad Hoc profiles support at most 100.")    print(f"Including all {len(enabled)} enabled registered iOS devices; no UDID input is needed.")
     unpack=work/"unpacked"; unpack.mkdir(exist_ok=True)
     run("ditto","-x","-k",str(source),str(unpack))
     payload=unpack/"Payload"; roots=list(payload.glob("*.app"))
