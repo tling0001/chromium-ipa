@@ -526,7 +526,7 @@ def main():
         if is_reynard and bundle == root:
             profile_entitlements=profile_plist(profile,work).get("Entitlements",{})
             if profile_entitlements.get("com.apple.developer.kernel.increased-memory-limit") is not True:
-                print("::warning::The Reynard profile does not authorize com.apple.developer.kernel.increased-memory-limit. The app will be signed only with profile-authorized entitlements; its increased memory allowance will not be retained.")
+                print("::warning::The Reynard profile does not authorize com.apple.developer.kernel.increased-memory-limit. Because this is a required entitlement, signing will stop rather than emit an IPA that silently drops the increased-memory allowance.")
     # Sign every actual Mach-O executable/library before signing containing
     # frameworks, extensions, and the main app. Gecko ships bare Mach-O files
     # such as Frameworks/XUL which have no .dylib or .framework suffix; an
