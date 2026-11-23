@@ -260,6 +260,19 @@ def bid(bundle):
     if not x: raise RuntimeError("Missing CFBundleIdentifier: "+str(bundle))
     return x
 
+def normalized_root_bundle_id(identifier):
+    """Create an available team-scoped ID, including for Apple's reserved namespace."""
+    base=re.sub(r"(?:\.tling)+$", "", identifier)
+    if not base:
+        raise RuntimeError(f"Cannot derive a valid base bundle identifier from {identifier!r}.")
+    # Apple reserves com.apple.* identifiers. Replace that namespace before
+    # adding our suffix so App Store Connect can register the App ID.
+    if base=="com.apple":
+        base="com.tling0001.apple"
+    elif base.startswith("com.apple."):
+        base="com.tling0001."+base[len("com.apple."):]
+    return base+".tling"
+
 def is_macho(path):
     """Identify Mach-O code by its file type, not by its filename extension."""
     if path.is_symlink() or not path.is_file():
@@ -520,10 +533,7 @@ def main():
     # Normalize any number of previously appended suffixes to exactly one.
     # This makes re-signing an already processed IPA idempotent and repairs
     # artifacts produced by older runs that appended the namespace repeatedly.
-    root_base=re.sub(r"(?:\.tling)+$", "", root_original)
-    if not root_base:
-        raise RuntimeError(f"Cannot derive a valid base bundle identifier from {root_original!r}.")
-    root_updated=root_base+".tling"
+    root_updated=normalized_root_bundle_id(root_original)
     is_chromium=root_base.startswith("com.tling0001.chrome")
     is_reynard=(root_base=="com.minh-ton.Reynard")
     if root_updated != root_original:
@@ -550,8 +560,9 @@ def main():
             )
         if updated in rewritten.values():
             raise RuntimeError("Bundle ID rewriting produced a duplicate identifier: "+updated)
-        metadata["CFBundleIdentifier"]=updated
-        # Update companion-bundle references if present, before signing.
+        # Update companion-bundle references before setting the rewritten
+        # CFBundleIdentifier. Otherwise the newly assigned ID itself matches
+        # the old prefix and gets rewritten a second time (e.g. .tling.tling).
         def rewrite_references(value):
             if isinstance(value,dict):
                 return {k:rewrite_references(v) for k,v in value.items()}
@@ -566,6 +577,7 @@ def main():
                     return root_updated+child_suffix
             return value
         metadata=rewrite_references(metadata)
+        metadata["CFBundleIdentifier"]=updated
         info.write_bytes(plistlib.dumps(metadata,fmt=plistlib.FMT_XML,sort_keys=True))
         rewritten[original]=updated
         print(f"Rewrote bundle identifier: {original} -> {updated}")
