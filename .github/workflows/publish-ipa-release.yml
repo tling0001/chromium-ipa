@@ -94,8 +94,29 @@ jobs:
                   raise SystemExit(f"Expected exactly one top-level app Info.plist; found {len(app_plists)}.")
               info = plistlib.loads(z.read(app_plists[0]))
 
-          bundle_id = info.get("CFBundleIdentifier", "").strip()
-          app_name = str(info.get("CFBundleDisplayName") or info.get("CFBundleName") or bundle_id).strip()
+          bundle_id = str(info.get("CFBundleIdentifier") or "").strip()
+          app_name = str(info.get("CFBundleDisplayName") or "").strip()
+          if not app_name:
+              # Some apps keep their visible name in a localized InfoPlist.strings
+              # instead of the root Info.plist.
+              app_dir = app_plists[0].rsplit("/", 1)[0]
+              for locale in ("en.lproj", "Base.lproj"):
+                  localized_path = f"{app_dir}/{locale}/InfoPlist.strings"
+                  if localized_path not in z.namelist():
+                      continue
+                  try:
+                      localized = plistlib.loads(z.read(localized_path))
+                  except Exception:
+                      continue
+                  app_name = str(localized.get("CFBundleDisplayName") or localized.get("CFBundleName") or "").strip()
+                  if app_name:
+                      break
+          if not app_name:
+              app_name = str(info.get("CFBundleName") or "").strip()
+          if not app_name:
+              # Last-resort readable fallback, never show the signing suffix.
+              app_name = bundle_id.removesuffix(".tling").split(".")[-1]
+          app_name = " ".join(app_name.split())
           version = str(info.get("CFBundleShortVersionString") or info.get("CFBundleVersion") or "").strip()
           if not bundle_id or not version:
               raise SystemExit("The signed IPA is missing CFBundleIdentifier or app version metadata.")
