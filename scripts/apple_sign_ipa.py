@@ -123,7 +123,27 @@ class Apple:
         # in the Developer portal before they can be enabled. The API reports
         # these as forbidden; skip them so unrelated signing work can continue.
         current=self.pages(f"/bundleIds/{bundle_id_id}/bundleIdCapabilities")
-        if any(x.get("attributes",{}).get("capabilityType")==capability for x in current):
+        existing=next((x for x in current if x.get("attributes",{}).get("capabilityType")==capability),None)
+        if existing:
+            # Apple requires an explicit CloudKit compatibility version. Older
+            # registrations (or manually enabled iCloud capabilities) can
+            # exist with null settings, so repair them instead of treating the
+            # capability as fully configured.
+            if capability=="ICLOUD":
+                settings=existing.get("attributes",{}).get("settings") or []
+                configured=any(
+                    setting.get("key")=="ICLOUD_VERSION"
+                    and any(option.get("key")=="XCODE_6" and option.get("enabled",True) for option in setting.get("options",[]))
+                    for setting in settings
+                )
+                if not configured:
+                    merged=[setting for setting in settings if setting.get("key")!="ICLOUD_VERSION"]
+                    merged.append({"key":"ICLOUD_VERSION","options":[{"key":"XCODE_6","enabled":True}]})
+                    self.req("PATCH",f"/bundleIdCapabilities/{existing['id']}",json={"data":{
+                        "type":"bundleIdCapabilities","id":existing["id"],
+                        "attributes":{"settings":merged},
+                    }})
+                    print(f"Configured iCloud capability: {identifier} (XCODE_6 compatibility)")
             print(f"Capability already enabled: {capability}")
             return True
         # Sign in with Apple cannot be enabled without choosing its App ID
@@ -135,6 +155,13 @@ class Apple:
             attributes["settings"]=[{
                 "key":"APPLE_ID_AUTH_APP_CONSENT",
                 "options":[{"key":"PRIMARY_APP_CONSENT"}],
+            }]
+        elif capability=="ICLOUD":
+            # CloudKitVersion cannot be null when enabling iCloud. XCODE_6
+            # is Apple's supported modern compatibility setting.
+            attributes["settings"]=[{
+                "key":"ICLOUD_VERSION",
+                "options":[{"key":"XCODE_6","enabled":True}],
             }]
         try:
             self.req("POST","/bundleIdCapabilities",json={"data":{"type":"bundleIdCapabilities","attributes":attributes,"relationships":{"bundleId":{"data":{"type":"bundleIds","id":bundle_id_id}}}}})
