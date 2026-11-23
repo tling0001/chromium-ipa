@@ -345,7 +345,17 @@ def build_signing_entitlements(requested, allowed, identifier, team_id, expected
         # is authoritative for whether this is development or production.
         if key == "aps-environment" and isinstance(allowed.get(key),str):
             normalized=allowed[key]
+        # Apple's Associated Domains profile grant can be represented as a
+        # boolean capability grant rather than echoing the app's domain list.
+        # Accept that grant; if Apple enabled the capability but did not grant
+        # it in the generated profile, omit only this managed entitlement.
+        if key == "com.apple.developer.associated-domains" and allowed.get(key) is True:
+            result[key]=normalized
+            continue
         if key not in allowed or not _profile_value_allows(allowed[key],normalized):
+            if key == "com.apple.developer.associated-domains":
+                print(f"::warning::Omitting {key} from {identifier}: ASSOCIATED_DOMAINS could not be authorized in the generated provisioning profile. Signing will continue; Libby's universal links and web credentials may not work until the capability is approved/enabled and a new profile is generated.")
+                continue
             raise RuntimeError(
                 f"Required source entitlement {key!r}={normalized!r} for {identifier} "
                 "is not authorized by its generated provisioning profile. Enable/request "
