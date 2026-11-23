@@ -61,6 +61,44 @@ class EntitlementSigningTests(unittest.TestCase):
         self.assertNotIn("com.apple.developer.family-controls", result)
         self.assertEqual(result["application-identifier"], "NEWTEAM.com.example.app")
 
+    def test_associated_domains_boolean_profile_grant_authorizes_domain_list(self):
+        requested = {
+            "com.apple.developer.associated-domains": [
+                "applinks:libbyapp.com",
+                "webcredentials:libbyapp.com",
+            ],
+        }
+        allowed = {
+            "application-identifier": "NEWTEAM.com.overdrive.dewey.tling",
+            "com.apple.developer.team-identifier": "NEWTEAM",
+            "get-task-allow": False,
+            "com.apple.developer.associated-domains": True,
+        }
+        result = signer.build_signing_entitlements(
+            requested, allowed, "com.overdrive.dewey.tling", "NEWTEAM", False
+        )
+        self.assertEqual(
+            result["com.apple.developer.associated-domains"],
+            ["applinks:libbyapp.com", "webcredentials:libbyapp.com"],
+        )
+
+    def test_ungranted_associated_domains_are_dropped_without_failing(self):
+        requested = {
+            "com.apple.developer.associated-domains": [
+                "applinks:libbyapp.com",
+                "webcredentials:libbyapp.com",
+            ],
+        }
+        allowed = {
+            "application-identifier": "NEWTEAM.com.overdrive.dewey.tling",
+            "com.apple.developer.team-identifier": "NEWTEAM",
+            "get-task-allow": False,
+        }
+        result = signer.build_signing_entitlements(
+            requested, allowed, "com.overdrive.dewey.tling", "NEWTEAM", False
+        )
+        self.assertNotIn("com.apple.developer.associated-domains", result)
+
     def test_profile_wildcard_authorizes_matching_string(self):
         self.assertTrue(signer._profile_value_allows("TEAM.example.*", "TEAM.example.app"))
         self.assertFalse(signer._profile_value_allows("TEAM.other.*", "TEAM.example.app"))
