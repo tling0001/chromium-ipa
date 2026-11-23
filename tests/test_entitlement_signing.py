@@ -20,6 +20,35 @@ class EntitlementSigningTests(unittest.TestCase):
             ["APP_GROUPS", "PUSH_NOTIFICATIONS"],
         )
 
+    def test_app_id_names_use_bundle_display_names_without_project_prefix(self):
+        self.assertEqual(signer.sanitize_app_id_name("Libby", "com.overdrive.mobile"), "Libby")
+        self.assertEqual(
+            signer.sanitize_app_id_name("Libby Share Extension", "com.overdrive.mobile.share"),
+            "Libby Share Extension",
+        )
+        self.assertEqual(signer.sanitize_app_id_name("", "com.example.Reader"), "Reader")
+
+    def test_skipped_managed_capability_is_not_claimed(self):
+        requested = {
+            "com.apple.developer.family-controls": True,
+            "application-identifier": "OLDTEAM.com.example.app",
+        }
+        allowed = {
+            "application-identifier": "NEWTEAM.com.example.app",
+            "com.apple.developer.team-identifier": "NEWTEAM",
+            "get-task-allow": True,
+        }
+        result = signer.build_signing_entitlements(
+            requested,
+            allowed,
+            "com.example.app",
+            "NEWTEAM",
+            True,
+            {"com.apple.developer.family-controls"},
+        )
+        self.assertNotIn("com.apple.developer.family-controls", result)
+        self.assertEqual(result["application-identifier"], "NEWTEAM.com.example.app")
+
     def test_profile_wildcard_authorizes_matching_string(self):
         self.assertTrue(signer._profile_value_allows("TEAM.example.*", "TEAM.example.app"))
         self.assertFalse(signer._profile_value_allows("TEAM.other.*", "TEAM.example.app"))
