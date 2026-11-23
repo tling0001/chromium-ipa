@@ -95,6 +95,7 @@ jobs:
               info = plistlib.loads(z.read(app_plists[0]))
 
           bundle_id = info.get("CFBundleIdentifier", "").strip()
+          app_name = str(info.get("CFBundleDisplayName") or info.get("CFBundleName") or bundle_id).strip()
           version = str(info.get("CFBundleShortVersionString") or info.get("CFBundleVersion") or "").strip()
           if not bundle_id or not version:
               raise SystemExit("The signed IPA is missing CFBundleIdentifier or app version metadata.")
@@ -145,6 +146,7 @@ jobs:
 
           {install_instructions}
 
+          **App name:** {app_name}
           **Bundle ID:** `{bundle_id}`
           **App version:** `{version}`
           **Signing mode:** `{signing_mode}`
