@@ -194,7 +194,8 @@ class Apple:
         # App Store Connect profile names are not reliably unique across App IDs.
         # Include the bundle identifier so two apps called (for example) Gboard
         # cannot collide on the shared "Gboard Development" name.
-        name=name[:max(1,99-len(bid_id))].rstrip()+" ["+bid_id+"]"
+        scope=bid_id if len(bid_id)<=80 else bid_id[:65]+"-"+hashlib.sha256(bid_id.encode()).hexdigest()[:10]
+        name=name[:max(1,97-len(scope))].rstrip()+" ["+scope+"]"
         profiles=[
             p for p in self.pages(f"/profiles?filter[profileType]={profile_type}&limit=200")
             if p.get("attributes",{}).get("name")==name
