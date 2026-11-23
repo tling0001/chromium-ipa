@@ -24,7 +24,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install signer dependencies
+        run: python -m pip install --disable-pip-version-check 'PyJWT[crypto]' requests pynacl
       - name: Compile Python helpers
         run: python -m py_compile scripts/apple_sign_ipa.py scripts/apple_devices.py
+      - name: Test entitlement inspection and profile validation
+        run: python -m unittest discover -s tests -v
       - name: Validate GitHub Actions workflow syntax
         run: go run github.com/rhysd/actionlint/cmd/actionlint@latest
