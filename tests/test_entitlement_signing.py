@@ -420,5 +420,23 @@ class EntitlementSigningTests(unittest.TestCase):
         self.assertNotIn("com.apple.developer.kernel.increased-memory-limit", result)
 
 
+    def test_custom_main_bundle_identifier_is_used_verbatim_without_tling_suffix(self):
+        self.assertEqual(
+            signer.resolve_root_bundle_id("com.example.upstream", "com.customer.customapp"),
+            "com.customer.customapp",
+        )
+        self.assertEqual(
+            signer.resolve_root_bundle_id("com.example.upstream.tling", "org.example.reader"),
+            "org.example.reader",
+        )
+
+    def test_custom_main_bundle_identifier_rejects_invalid_or_reserved_values(self):
+        for invalid in ("", "not-a-bundle-id", "com..example", "com.apple.reader", "com.example.trailing-"):
+            if not invalid:
+                continue
+            with self.subTest(invalid=invalid), self.assertRaises(RuntimeError):
+                signer.resolve_root_bundle_id("com.example.upstream", invalid)
+
+
 if __name__ == "__main__":
     unittest.main()
