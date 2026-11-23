@@ -78,8 +78,7 @@ class Apple:
             if x.get("attributes",{}).get("identifier")==bid: return x["id"]
         # Apple App ID names are stricter than bundle identifiers: use the
         # app/extension's own display name, not the source project name.
-        display_name=re.sub(r"[^A-Za-z0-9 ]+", " ", display_name or bid.rsplit(".",1)[-1])
-        display_name=" ".join(display_name.split())[:100] or bid.rsplit(".",1)[-1][:100]
+        display_name=sanitize_app_id_name(display_name,bid)
         x=self.req("POST","/bundleIds",json={"data":{"type":"bundleIds","attributes":{"identifier":bid,"name":display_name,"platform":"IOS"}}})
         print(f"Created App ID: {bid} (name: {display_name})"); return x["data"]["id"]
     def ensure_capability(self,bundle_id_id,capability,identifier):
@@ -257,6 +256,11 @@ def display_name_for_bundle(bundle):
         if isinstance(candidate,str) and candidate.strip():
             return candidate.strip()
     return bid(bundle).rsplit(".",1)[-1]
+
+def sanitize_app_id_name(display_name,identifier):
+    fallback=identifier.rsplit(".",1)[-1]
+    sanitized=re.sub(r"[^A-Za-z0-9 ]+", " ", display_name or fallback)
+    return " ".join(sanitized.split())[:100] or fallback[:100]
 
 def _profile_value_allows(allowed, requested):
     """Check the profile allowlist, including Apple's string wildcards."""
