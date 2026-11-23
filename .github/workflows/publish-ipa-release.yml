@@ -157,6 +157,7 @@ jobs:
               f.write(notes)
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"app_name={app_name}\\n")
               f.write(f"bundle_id={bundle_id}\n")
               f.write(f"version={version}\n")
               f.write(f"release_name={release_name}\n")
