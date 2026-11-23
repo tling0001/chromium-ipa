@@ -440,7 +440,8 @@ def main():
     devices=apple.devices()
     enabled=[d for d in devices if d.get("attributes",{}).get("status")=="ENABLED"]
     if not enabled: raise RuntimeError("No ENABLED iOS devices registered with this Apple team.")
-    if len(enabled)>100: raise RuntimeError(f"Found {len(enabled)} enabled iOS devices; Ad Hoc profiles support at most 100.")    print(f"Including all {len(enabled)} enabled registered iOS devices; no UDID input is needed.")
+    if len(enabled)>100: raise RuntimeError(f"Found {len(enabled)} enabled iOS devices; Ad Hoc profiles support at most 100.")
+    print(f"Including all {len(enabled)} enabled registered iOS devices; no UDID input is needed.")
     unpack=work/"unpacked"; unpack.mkdir(exist_ok=True)
     run("ditto","-x","-k",str(source),str(unpack))
     payload=unpack/"Payload"; roots=list(payload.glob("*.app"))
