@@ -492,6 +492,14 @@ def main():
     for bundle in bundles:
         identifier=bid(bundle); app_id=apple.appid(identifier)
         requested=source_entitlements_by_updated.get(identifier,{})
+        if is_reynard and bundle == root and "com.apple.developer.kernel.increased-memory-limit" not in requested:
+            # Reynard's upstream 0.22.x build declares this requirement in its
+            # target configuration, but its --no-signing IPA may omit the
+            # expanded entitlement plist. Preserve the known requirement.
+            requested=dict(requested)
+            requested["com.apple.developer.kernel.increased-memory-limit"]=True
+            source_entitlements_by_updated[identifier]=requested
+            print("::notice::Added Reynard's documented increased-memory-limit entitlement requirement because the unsigned source IPA did not carry entitlement metadata.")
         detected_capabilities=capabilities_for_entitlements(requested)
         if detected_capabilities:
             capability_list=", ".join(detected_capabilities)
