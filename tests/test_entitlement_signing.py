@@ -30,6 +30,20 @@ class EntitlementSigningTests(unittest.TestCase):
             ["APP_GROUPS", "PUSH_NOTIFICATIONS"],
         )
 
+    def test_reserved_apple_bundle_namespace_is_rewritten(self):
+        self.assertEqual(
+            signer.normalized_root_bundle_id("com.apple.AppStoreConnect"),
+            "com.tling0001.AppStoreConnect.tling",
+        )
+        self.assertEqual(
+            signer.normalized_root_bundle_id("com.apple.AppStoreConnect.tling"),
+            "com.tling0001.AppStoreConnect.tling",
+        )
+        self.assertEqual(
+            signer.normalized_root_bundle_id("com.example.Reader"),
+            "com.example.Reader.tling",
+        )
+
     def test_app_id_names_use_bundle_display_names_without_project_prefix(self):
         self.assertEqual(signer.sanitize_app_id_name("Libby", "com.overdrive.mobile"), "Libby")
         self.assertEqual(
