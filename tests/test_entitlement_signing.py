@@ -60,6 +60,54 @@ class EntitlementSigningTests(unittest.TestCase):
             }],
         )
 
+    def test_icloud_capability_includes_required_cloudkit_version(self):
+        class FakeApple(signer.Apple):
+            def __init__(self):
+                self.payload = None
+            def pages(self, path):
+                return []
+            def req(self, method, path, **kwargs):
+                self.payload = kwargs["json"]
+                return {"data": {"id": "icloud-capability-id"}}
+
+        apple = FakeApple()
+        self.assertTrue(apple.ensure_capability("bundle-id-id", "ICLOUD", "com.example.app"))
+        attributes = apple.payload["data"]["attributes"]
+        self.assertEqual(attributes["capabilityType"], "ICLOUD")
+        self.assertEqual(
+            attributes["settings"],
+            [{
+                "key": "ICLOUD_VERSION",
+                "options": [{"key": "XCODE_6", "enabled": True}],
+            }],
+        )
+
+    def test_existing_icloud_capability_with_null_settings_is_repaired(self):
+        class FakeApple(signer.Apple):
+            def __init__(self):
+                self.patch = None
+            def pages(self, path):
+                return [{
+                    "id": "icloud-capability-id",
+                    "attributes": {"capabilityType": "ICLOUD", "settings": None},
+                }]
+            def req(self, method, path, **kwargs):
+                self.patch = (method, path, kwargs["json"])
+                return {"data": {"id": "icloud-capability-id"}}
+
+        apple = FakeApple()
+        self.assertTrue(apple.ensure_capability("bundle-id-id", "ICLOUD", "com.example.app"))
+        method, path, payload = apple.patch
+        self.assertEqual(method, "PATCH")
+        self.assertEqual(path, "/bundleIdCapabilities/icloud-capability-id")
+        self.assertEqual(
+            payload["data"]["attributes"]["settings"],
+            [{
+                "key": "ICLOUD_VERSION",
+                "options": [{"key": "XCODE_6", "enabled": True}],
+            }],
+        )
+
     def test_managed_capability_request_errors_are_skipped(self):
         self.assertTrue(signer.is_managed_capability_request_error(
             RuntimeError("Apple API POST returned HTTP 403: forbidden")
