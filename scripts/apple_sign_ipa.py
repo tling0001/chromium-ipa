@@ -53,6 +53,27 @@ def token():
     now = int(time.time())
     return jwt.encode({"iss":issuer,"iat":now,"exp":now+900,"aud":"appstoreconnect-v1"}, key, algorithm="ES256", headers={"kid":kid,"typ":"JWT"})
 
+def is_managed_capability_request_error(error):
+    """Identify Apple API responses that mean a capability needs a request/approval."""
+    detail=str(error)
+    lowered=detail.lower()
+    # App Store Connect commonly reports authorization/managed-capability
+    # failures as 403. Also recognize explicit request/approval language in
+    # other response codes, without swallowing unrelated API failures.
+    if "http 403" in lowered:
+        return True
+    return any(marker in lowered for marker in (
+        "managed capability",
+        "capability request",
+        "requires a request",
+        "requires request",
+        "requires approval",
+        "request access",
+        "approval required",
+        "not eligible to enable",
+        "must be requested",
+    ))
+
 class Apple:
     def __init__(self):
         self.s=requests.Session()
@@ -98,13 +119,8 @@ class Apple:
             self.req("POST","/bundleIdCapabilities",json={"data":{"type":"bundleIdCapabilities","attributes":{"capabilityType":capability},"relationships":{"bundleId":{"data":{"type":"bundleIds","id":bundle_id_id}}}}})
         except RuntimeError as error:
             detail=str(error)
-            lowered=detail.lower()
-            requires_request=("HTTP 403" in detail or any(marker in lowered for marker in (
-                "managed capability","capability request","requires approval",
-                "request access","approval required"
-            )))
-            if requires_request:
-                print(f"::warning::Skipping {capability} for {identifier}: Apple indicates this capability cannot be enabled automatically ({detail}). The Account Holder may need to request/obtain approval in Certificates, Identifiers & Profiles → Capability Requests, then enable it under Capabilities. Signing will continue without this entitlement if the generated profile does not authorize it.")
+            if is_managed_capability_request_error(error):
+                print(f"::warning::Skipping {capability} for {identifier}: this capability requires an Apple capability request/approval and cannot be enabled automatically ({detail}). The corresponding source entitlement will be omitted from the signed app. Signing will continue; the feature may remain unavailable until the Account Holder obtains approval, enables the capability, and reruns signing.")
                 return False
             raise
         print(f"Enabled capability: {capability}")
@@ -575,7 +591,8 @@ def main():
         if is_reynard and bundle == root:
             profile_entitlements=profile_plist(profile,work).get("Entitlements",{})
             if profile_entitlements.get("com.apple.developer.kernel.increased-memory-limit") is not True:
-                print("::warning::The Reynard profile does not authorize com.apple.developer.kernel.increased-memory-limit. Because this is a required entitlement, signing will stop rather than emit an IPA that silently drops the increased-memory allowance.")
+                skipped_entitlements_by_bundle.setdefault(bid(bundle),set()).add("com.apple.developer.kernel.increased-memory-limit")
+                print("::warning::Omitting com.apple.developer.kernel.increased-memory-limit from Reynard because Apple's profile does not authorize it. Signing will continue, but the app may have reduced memory limits or fail to launch if it requires this entitlement.")
     # Sign every actual Mach-O executable/library before signing containing
     # frameworks, extensions, and the main app. Gecko ships bare Mach-O files
     # such as Frameworks/XUL which have no .dylib or .framework suffix; an
