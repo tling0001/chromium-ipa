@@ -255,7 +255,7 @@ class EntitlementSigningTests(unittest.TestCase):
                 "applinks:example.com",
                 "webcredentials:login.example.com",
                 "sapphire://autoSuggest?query=cat",
-                r"applinks:www\\.example.com",
+                r"applinks:www\.example.com",
             ],
         }
         allowed = {
