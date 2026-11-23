@@ -2,6 +2,7 @@
 """Automate Apple Ad Hoc provisioning and sign an iOS IPA using a Team API key."""
 from __future__ import annotations
 import base64, hashlib, json, os, re, secrets, subprocess, sys, time
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 import jwt, plistlib, requests
@@ -190,19 +191,51 @@ class Apple:
         print(f"Created {certificate_type} certificate:",x["attributes"].get("serialNumber",""))
         return p12,password
     def profile(self,name,bid_id,cert_id,device_ids,path,profile_type):
-        # Replace only an existing profile with this exact generated name,
-        # App ID, and profile type.
-        for existing in self.pages(f"/profiles?filter[profileType]={profile_type}&limit=200"):
-            if existing.get("attributes",{}).get("name") != name[:100]:
+        # App Store Connect profile names are not reliably unique across App IDs.
+        # Include the bundle identifier so two apps called (for example) Gboard
+        # cannot collide on the shared "Gboard Development" name.
+        name=name[:max(1,99-len(bid_id))].rstrip()+" ["+bid_id+"]"
+        profiles=[
+            p for p in self.pages(f"/profiles?filter[profileType]={profile_type}&limit=200")
+            if p.get("attributes",{}).get("name")==name
+        ]
+        details=[]
+        for listed in profiles:
+            detail=self.req("GET",f"/profiles/{listed['id']}?include=bundleId,certificates,devices")
+            data=detail.get("data",{})
+            rel=data.get("relationships",{})
+            if rel.get("bundleId",{}).get("data",{}).get("id")!=bid_id:
                 continue
-            pid=existing["id"]
-            detail=self.req("GET",f"/profiles/{pid}?include=bundleId")
-            rel=detail.get("data",{}).get("relationships",{}).get("bundleId",{}).get("data",{})
-            if rel.get("id") != bid_id:
-                continue
-            print(f"Deleting duplicate {profile_type} profile {pid} for {name}; it will be regenerated.")
+            attrs=data.get("attributes",{})
+            details.append((attrs.get("createdDate") or "",data))
+        # Newest first. Reuse the newest active profile only when it already
+        # contains the requested signing certificate and exact device set.
+        details.sort(key=lambda item:item[0],reverse=True)
+        expected_devices=set(device_ids)
+        now=datetime.now(timezone.utc)
+        for _,data in details:
+            attrs=data.get("attributes",{})
+            rel=data.get("relationships",{})
+            certs={x.get("id") for x in rel.get("certificates",{}).get("data",[])}
+            devices={x.get("id") for x in rel.get("devices",{}).get("data",[])}
+            expires=attrs.get("expirationDate")
+            try:
+                expiry=datetime.fromisoformat(expires.replace("Z","+00:00")) if expires else None
+            except (TypeError,ValueError):
+                expiry=None
+            if (attrs.get("profileState")=="ACTIVE" and expiry and expiry>now
+                    and cert_id in certs and devices==expected_devices
+                    and attrs.get("profileContent")):
+                print(f"Reusing newest active {profile_type} profile {data['id']} for {bid_id} ({name}).")
+                path.write_bytes(base64.b64decode(attrs["profileContent"]))
+                return data
+        # Stale profiles for this exact App ID/name are removed before
+        # regeneration. Profiles belonging to other App IDs are never touched.
+        for _,data in details:
+            pid=data["id"]
+            print(f"Deleting stale {profile_type} profile {pid} for {bid_id}; it will be regenerated.")
             self.req("DELETE",f"/profiles/{pid}")
-        body={"data":{"type":"profiles","attributes":{"name":name[:100],"profileType":profile_type},"relationships":{
+        body={"data":{"type":"profiles","attributes":{"name":name,"profileType":profile_type},"relationships":{
             "bundleId":{"data":{"type":"bundleIds","id":bid_id}},
             "certificates":{"data":[{"type":"certificates","id":cert_id}]},
             "devices":{"data":[{"type":"devices","id":d} for d in device_ids]}}}}
