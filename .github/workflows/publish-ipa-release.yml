@@ -173,20 +173,22 @@ jobs:
           with open("release/manifest.plist", "wb") as f:
               plistlib.dump(manifest, f, fmt=plistlib.FMT_XML, sort_keys=False)
 
-          # Keep the custom-scheme URL visibly copyable in GitHub's Markdown
-          # renderer, which may suppress non-HTTP hrefs in rendered links.
+          # Use one consistent sideloading flow for both signing modes.
+          # Normal Install is configured in Sideloadly Settings (not Advanced Options).
           signing_mode = os.environ.get("SIGNING_MODE", "development").lower()
-          if signing_mode == "development":
-              install_instructions = f"""**Install on iPhone or iPad**
+          install_instructions = f"""**Install on iPhone or iPad**
 
-          Download `{ipa_name}` from this release and install it using AltStore or SideStore.
-          In AltStore/SideStore, enable **Keep App Extensions** for Reynard."""
+          1. Download `{ipa_name}` from this release.
+          2. Connect your iPhone or iPad to your computer and open **Sideloadly**.
+          3. Select the downloaded IPA.
+          4. In **Sideloadly Settings**, select **Normal Install**.
+          5. Start the installation and follow Sideloadly's prompts.
+
+          """
+          if signing_mode == "adhoc":
+              install_instructions += "Your device must be registered in the provisioning profile for this Ad Hoc build."
           else:
-              install_instructions = f"""**Install on iPhone or iPad**
-
-          `{install_url}`
-
-          [Open the OTA manifest]({manifest_url})"""
+              install_instructions += "Your device must be registered and included in the signing team's Development provisioning profile."
           notes = f"""## iOS installation
 
           {install_instructions}
