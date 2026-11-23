@@ -20,6 +20,16 @@ ENTITLEMENT_CAPABILITIES = {
     "com.apple.developer.associated-domains": "ASSOCIATED_DOMAINS",
     "com.apple.security.application-groups": "APP_GROUPS",
     "com.apple.developer.healthkit": "HEALTHKIT",
+    "com.apple.developer.game-center": "GAME_CENTER",
+    "com.apple.developer.pass-type-identifiers": "WALLET",
+    "com.apple.external-accessory.wireless-configuration": "WIRELESS_ACCESSORY_CONFIGURATION",
+    "com.apple.developer.networking.vpn.api": "PERSONAL_VPN",
+    "com.apple.developer.networking.HotspotConfiguration": "HOT_SPOT",
+    "com.apple.developer.networking.wifi-info": "ACCESS_WIFI_INFORMATION",
+    "com.apple.developer.networking.custom-protocol": "NETWORK_CUSTOM_PROTOCOL",
+    "com.apple.developer.system-extension.install": "SYSTEM_EXTENSION_INSTALL",
+    "com.apple.developer.user-management": "USER_MANAGEMENT",
+    "inter-app-audio": "INTER_APP_AUDIO",
     "com.apple.developer.homekit": "HOMEKIT",
     "com.apple.developer.siri": "SIRIKIT",
     "com.apple.developer.classkit-environment": "CLASSKIT",
@@ -264,11 +274,18 @@ def build_signing_entitlements(requested, allowed, identifier, team_id, expected
         raise RuntimeError(f"Provisioning profile for {identifier} has no application-identifier.")
     source_app_id=requested.get("application-identifier","")
     source_prefix=source_app_id.split(".",1)[0] if isinstance(source_app_id,str) else ""
+    if not source_prefix:
+        source_team=requested.get("com.apple.developer.team-identifier","")
+        source_prefix=source_team if isinstance(source_team,str) else ""
     result={}
     for key,value in requested.items():
         if key in ("application-identifier","com.apple.developer.team-identifier","get-task-allow"):
             continue
         normalized=_rewrite_entitlement_value(value,source_prefix,prefix)
+        # APNs uses a signing-mode-specific environment; the generated profile
+        # is authoritative for whether this is development or production.
+        if key == "aps-environment" and isinstance(allowed.get(key),str):
+            normalized=allowed[key]
         if key not in allowed or not _profile_value_allows(allowed[key],normalized):
             raise RuntimeError(
                 f"Required source entitlement {key!r}={normalized!r} for {identifier} "
@@ -469,7 +486,10 @@ def main():
     for bundle in bundles:
         identifier=bid(bundle); app_id=apple.appid(identifier)
         requested=source_entitlements_by_updated.get(identifier,{})
-        for capability in capabilities_for_entitlements(requested):
+        detected_capabilities=capabilities_for_entitlements(requested)
+        if detected_capabilities:
+            print(f"Entitlement capability requests for {identifier}: {\", \".join(detected_capabilities)}")
+        for capability in detected_capabilities:
             apple.ensure_capability(app_id,capability)
         # Preserve the known Chromium integrations even when an upstream
         # unsigned IPA omitted its original entitlement metadata.
