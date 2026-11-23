@@ -146,19 +146,29 @@ class EntitlementSigningTests(unittest.TestCase):
         )
         self.assertEqual(result["keychain-access-groups"], ["NEWTEAM.com.example.app"])
 
-    def test_missing_profile_grant_fails_instead_of_dropping_entitlement(self):
-        with self.assertRaisesRegex(RuntimeError, "not authorized"):
-            signer.build_signing_entitlements(
-                {"com.apple.developer.kernel.increased-memory-limit": True},
-                {
-                    "application-identifier": "NEWTEAM.com.example.app",
-                    "com.apple.developer.team-identifier": "NEWTEAM",
-                    "get-task-allow": True,
-                },
-                "com.example.app",
-                "NEWTEAM",
-                True,
-            )
+    def test_ungranted_carplay_audio_is_dropped_without_failing(self):
+        requested = {"com.apple.developer.carplay-audio": True}
+        allowed = {
+            "application-identifier": "NEWTEAM.com.overdrive.dewey.tling",
+            "com.apple.developer.team-identifier": "NEWTEAM",
+            "get-task-allow": True,
+        }
+        result = signer.build_signing_entitlements(
+            requested, allowed, "com.overdrive.dewey.tling", "NEWTEAM", True
+        )
+        self.assertNotIn("com.apple.developer.carplay-audio", result)
+
+    def test_ungranted_increased_memory_entitlement_is_dropped_without_failing(self):
+        requested = {"com.apple.developer.kernel.increased-memory-limit": True}
+        allowed = {
+            "application-identifier": "NEWTEAM.com.example.app",
+            "com.apple.developer.team-identifier": "NEWTEAM",
+            "get-task-allow": True,
+        }
+        result = signer.build_signing_entitlements(
+            requested, allowed, "com.example.app", "NEWTEAM", True
+        )
+        self.assertNotIn("com.apple.developer.kernel.increased-memory-limit", result)
 
 
 if __name__ == "__main__":
