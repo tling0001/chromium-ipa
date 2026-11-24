@@ -766,26 +766,22 @@ def main():
             if profile_entitlements.get("com.apple.developer.kernel.increased-memory-limit") is not True:
                 skipped_entitlements_by_bundle.setdefault(bid(bundle),set()).add("com.apple.developer.kernel.increased-memory-limit")
                 print("::warning::Omitting com.apple.developer.kernel.increased-memory-limit from Reynard because Apple's profile does not authorize it. Signing will continue, but the app may have reduced memory limits or fail to launch if it requires this entitlement.")
-    # Sign every actual Mach-O executable/library before signing containing
-    # frameworks, extensions, and the main app. Gecko ships bare Mach-O files
-    # such as Frameworks/XUL which have no .dylib or .framework suffix; an
-    # extension-based scan silently skipped them and caused dyld to reject XUL.
-    macho_files=[p for p in root.rglob("*") if is_macho(p)]
-    if not macho_files:
+    # Preserve existing framework signatures. Only re-sign standalone Mach-O
+    # code outside .framework bundles; replacing framework signatures can break
+    # apps that depend on their original embedded framework seals.
+    framework_dirs=[p for p in root.rglob("*.framework") if p.is_dir()]
+    def is_inside_framework(path):
+        return any(parent == framework or framework in path.parents
+                   for framework in framework_dirs
+                   for parent in (path,))
+
+    macho_files=[p for p in root.rglob("*") if is_macho(p) and not is_inside_framework(p)]
+    if not macho_files and not framework_dirs:
         raise RuntimeError("No Mach-O code was found inside the app; refusing to emit an unsigned IPA.")
-    print(f"Found {len(macho_files)} Mach-O code file(s) by file type.")
+    print(f"Found {len(macho_files)} standalone Mach-O code file(s); preserving signatures in {len(framework_dirs)} framework bundle(s).")
     for p in sorted(macho_files,key=lambda x:len(x.parts),reverse=True):
         run("codesign","--force","--sign",identity,"--timestamp=none",str(p))
-        print("Signed Mach-O:",p.relative_to(root))
-
-    # Frameworks are bundles, so sign them after their inner Mach-O files.
-    frameworks=sorted(
-        (p for p in root.rglob("*.framework") if p.is_dir()),
-        key=lambda x:len(x.parts),reverse=True
-    )
-    for framework in frameworks:
-        run("codesign","--force","--sign",identity,"--timestamp=none",str(framework))
-        run("codesign","--verify","--strict","--verbose=2",str(framework))
+        print("Signed standalone Mach-O:",p.relative_to(root))
 
     # Provisioned .appex/.app bundles are signed last, deepest first, with the
     # exact entitlements authorized by their matching Ad Hoc profiles.
@@ -803,7 +799,7 @@ def main():
     if out.exists(): out.unlink()
     run("ditto","-c","-k","--sequesterRsrc","--keepParent",str(payload),str(out))
     print(run("shasum","-a","256",str(out),capture=True).strip())
-    print(f"{mode.capitalize()} IPA signed and verified. {len(macho_files)} Mach-O file(s), {len(frameworks)} framework(s), {len(bundles)} app/extension bundle(s), {len(enabled)} registered enabled devices.")
+    print(f"{mode.capitalize()} IPA signed and verified. {len(macho_files)} standalone Mach-O file(s), {len(framework_dirs)} preserved framework bundle(s), {len(bundles)} app/extension bundle(s), {len(enabled)} registered enabled devices.")
     if is_chromium:
         print("If App Group warnings appeared, register group.com.tling0001.chrome and group.com.tling0001.common in Certificates, Identifiers & Profiles, then assign both groups to every Chromium app/extension App ID before relying on cross-extension sharing.")
 
