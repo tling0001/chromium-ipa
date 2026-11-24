@@ -321,21 +321,24 @@ def wildcard_app_id_fallbacks(identifier):
     return list(dict.fromkeys(candidate for candidate in candidates if candidate != identifier))
 
 def appid_with_fallback(apple, identifier, display_name):
-    """Try the exact App ID first, then the two requested wildcard scopes."""
+    """Register the original ID, then a .tling-only App ID, then wildcard IDs."""
     failures=[]
-    for candidate in [identifier,*wildcard_app_id_fallbacks(identifier)]:
+    candidates=[identifier,identifier+".tling",*wildcard_app_id_fallbacks(identifier)]
+    for candidate in dict.fromkeys(candidates):
         try:
             app_id=apple.appid(candidate,display_name)
             if candidate==identifier:
-                print(f"Using exact App ID: {candidate}")
+                print(f"Using original App ID: {candidate}")
+            elif candidate==identifier+".tling":
+                print(f"::warning::Using registered App ID {candidate!r}; internal bundle ID remains {identifier!r}.")
             else:
-                print(f"::warning::Exact App ID {identifier!r} could not be registered. Falling back to wildcard App ID {candidate!r}.")
+                print(f"::warning::Using wildcard App ID {candidate!r} for internal bundle ID {identifier!r}.")
             return app_id,candidate
         except RuntimeError as error:
             failures.append((candidate,str(error)))
             print(f"::warning::Could not register App ID {candidate!r}: {error}")
     details="; ".join(f"{candidate}: {error}" for candidate,error in failures)
-    raise RuntimeError(f"Could not register an exact or fallback wildcard App ID for {identifier!r}. Attempts: {details}")
+    raise RuntimeError(f"Could not register an original, .tling-suffixed, or wildcard App ID for {identifier!r}. Attempts: {details}")
 
 def resolve_root_bundle_id(source_identifier, custom_identifier=""):
     """Preserve the source bundle ID unless an explicit custom ID was requested."""
@@ -470,7 +473,7 @@ def _rewrite_entitlement_value(value, old_prefix, new_prefix):
         return {key:_rewrite_entitlement_value(item,old_prefix,new_prefix) for key,item in value.items()}
     return value
 
-def build_signing_entitlements(requested, allowed, identifier, team_id, expected_get_task_allow, skipped_entitlements=None):
+def build_signing_entitlements(requested, allowed, identifier, team_id, expected_get_task_allow, skipped_entitlements=None, registered_app_id=None):
     """Claim authorized source entitlements; omit capabilities Apple requires the team to request."""
     skipped_entitlements=skipped_entitlements or set()
     app_identifier=allowed.get("application-identifier","")
@@ -543,7 +546,7 @@ def build_signing_entitlements(requested, allowed, identifier, team_id, expected
             )
             continue
         result[key]=normalized
-    result["application-identifier"]=prefix+"."+identifier
+    result["application-identifier"]=prefix+"."+(registered_app_id or identifier)
     result["com.apple.developer.team-identifier"]=team_id
     result["get-task-allow"]=expected_get_task_allow
     return result
@@ -552,11 +555,11 @@ def profile_plist(path,work):
     raw=run("security","cms","-D","-i",str(path),capture=True)
     return plistlib.loads(raw.encode())
 
-def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_task_allow,source_entitlements,skipped_entitlements=None):
+def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_task_allow,source_entitlements,skipped_entitlements=None,registered_app_id=None):
     data=profile_plist(profile,work); allowed=data.get("Entitlements",{})
     identifier=bid(bundle); appid=allowed.get("application-identifier","")
     prefix=appid.split(".",1)[0]
-    expected_appid=prefix+"."+identifier
+    expected_appid=prefix+"."+(registered_app_id or identifier)
     if not prefix or not _profile_value_allows(appid,expected_appid):
         raise RuntimeError(f"Provisioning profile application-identifier mismatch for {identifier}: expected exact or wildcard authorization for {expected_appid!r}, got {appid!r}.")
     prefixes=data.get("ApplicationIdentifierPrefix",[])
@@ -580,7 +583,7 @@ def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_
     profile_cert_hashes={hashlib.sha1(cert).hexdigest().upper() for cert in certs}
     if identity_sha1 not in profile_cert_hashes:
         raise RuntimeError(f"Provisioning profile for {identifier} does not contain the distribution certificate used to sign it (SHA-1 {identity_sha1}).")
-    ent=build_signing_entitlements(source_entitlements,allowed,identifier,team_id,expected_get_task_allow,skipped_entitlements)
+    ent=build_signing_entitlements(source_entitlements,allowed,identifier,team_id,expected_get_task_allow,skipped_entitlements,registered_app_id)
     if allowed.get(EVA) is not True:
         print(f"::warning::Profile for {identifier} does not authorize {EVA}; signature will be valid only for allowed entitlements and the known startup crash may remain.")
     if identifier.startswith("com.tling0001.chrome"):
@@ -651,32 +654,10 @@ def main():
     if custom_main_bundle_id:
         print(f"Using explicitly requested custom main app bundle identifier: {root_updated}")
 
-    # First try to register every original identifier unchanged. If Apple's
-    # API rejects any member of the app/extension family, retry the entire
-    # family with a distinct internal identifier ending in .tling. The suffix
-    # is applied to the root before extension suffixes, keeping all embedded
-    # bundles inside the rewritten app namespace (app.tling.extension).
-    exact_registration_failures=[]
-    for bundle in bundles:
-        original=bid(bundle)
-        try:
-            apple.appid(original,display_names_by_original.get(original,original.rsplit(".",1)[-1]))
-        except RuntimeError as error:
-            exact_registration_failures.append((original,str(error)))
-            print(f"::warning::Could not register original App ID {original!r}: {error}")
-    if exact_registration_failures:
-        previous_root=root_updated
-        if not root_updated.endswith(".tling"):
-            root_updated=root_updated+".tling"
-        print(
-            f"::warning::At least one original App ID could not be registered; "
-            f"trying a separate .tling internal bundle-ID family: {previous_root} -> {root_updated}"
-        )
-        for original,detail in exact_registration_failures:
-            print(f"::notice::Original App ID registration failed for {original}: {detail}")
-    else:
-        print("All original app and extension App IDs registered successfully; keeping the original internal bundle IDs.")
-
+    # Keep every CFBundleIdentifier exactly as supplied by the source IPA.
+    # App Store Connect registration may use a separate .tling-suffixed ID;
+    # the profile's application-identifier entitlement is then checked against
+    # that registered ID while the code-signature Identifier remains original.
     is_chromium=root_base.startswith("com.tling0001.chrome")
     is_reynard=(root_base=="com.minh-ton.Reynard")
     if root_updated != root_original:
@@ -757,11 +738,13 @@ def main():
     source_entitlements_by_updated={rewritten[original]:values for original,values in source_entitlements_by_original.items()}
     display_names_by_updated={rewritten[original]:value for original,value in display_names_by_original.items()}
     skipped_entitlements_by_bundle={}
+    registered_app_ids={}
     for bundle in bundles:
         identifier=bid(bundle)
         app_id,registered_app_id=appid_with_fallback(
             apple,identifier,display_names_by_updated.get(identifier,identifier.rsplit(".",1)[-1])
         )
+        registered_app_ids[identifier]=registered_app_id
         uses_wildcard_app_id=registered_app_id.endswith(".*")
         requested=source_entitlements_by_updated.get(identifier,{})
         if is_reynard and bundle == root and "com.apple.developer.kernel.increased-memory-limit" not in requested:
@@ -860,7 +843,7 @@ def main():
     for bundle in bundles:
         profile=profile_dir/(re.sub(r"[^A-Za-z0-9_.-]","_",bid(bundle))+".mobileprovision")
         identifier=bid(bundle)
-        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id,expected_get_task_allow,source_entitlements_by_updated.get(identifier,{}),skipped_entitlements_by_bundle.get(identifier,set()))
+        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id,expected_get_task_allow,source_entitlements_by_updated.get(identifier,{}),skipped_entitlements_by_bundle.get(identifier,set()),registered_app_ids.get(identifier,identifier))
 
     # Verify each Mach-O independently after its containing bundles have been
     # signed, then verify the complete app seal recursively.
