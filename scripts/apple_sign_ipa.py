@@ -509,7 +509,7 @@ def _rewrite_entitlement_value(value, old_prefix, new_prefix):
         return {key:_rewrite_entitlement_value(item,old_prefix,new_prefix) for key,item in value.items()}
     return value
 
-def build_signing_entitlements(requested, allowed, identifier, team_id, expected_get_task_allow, skipped_entitlements=None, registered_app_id=None):
+def build_signing_entitlements(requested, allowed, identifier, team_id, expected_get_task_allow, skipped_entitlements=None, registered_app_id=None, app_groups_override=None):
     """Claim authorized source entitlements; omit capabilities Apple requires the team to request."""
     skipped_entitlements=skipped_entitlements or set()
     app_identifier=allowed.get("application-identifier","")
@@ -522,6 +522,13 @@ def build_signing_entitlements(requested, allowed, identifier, team_id, expected
         source_team=requested.get("com.apple.developer.team-identifier","")
         source_prefix=source_team if isinstance(source_team,str) else ""
     result={}
+    requested=dict(requested)
+    if app_groups_override is not None:
+        requested["com.apple.security.application-groups"]=list(app_groups_override)
+        allowed_groups=allowed.get("com.apple.security.application-groups",[])
+        missing=[group for group in app_groups_override if not isinstance(allowed_groups,list) or not any(_profile_value_allows(grant,group) for grant in allowed_groups)]
+        if missing:
+            raise RuntimeError(f"Provisioning profile for {identifier} does not authorize requested App Groups: {missing!r}. Register each group and associate it with this app/extension App ID in Certificates, Identifiers & Profiles, then rerun signing.")
     for key,value in requested.items():
         if key in ("application-identifier","com.apple.developer.team-identifier","get-task-allow"):
             continue
@@ -591,7 +598,7 @@ def profile_plist(path,work):
     raw=run("security","cms","-D","-i",str(path),capture=True)
     return plistlib.loads(raw.encode())
 
-def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_task_allow,source_entitlements,skipped_entitlements=None,registered_app_id=None):
+def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_task_allow,source_entitlements,skipped_entitlements=None,registered_app_id=None,app_groups_override=None):
     data=profile_plist(profile,work); allowed=data.get("Entitlements",{})
     identifier=bid(bundle); appid=allowed.get("application-identifier","")
     prefix=appid.split(".",1)[0]
@@ -619,7 +626,7 @@ def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_
     profile_cert_hashes={hashlib.sha1(cert).hexdigest().upper() for cert in certs}
     if identity_sha1 not in profile_cert_hashes:
         raise RuntimeError(f"Provisioning profile for {identifier} does not contain the distribution certificate used to sign it (SHA-1 {identity_sha1}).")
-    ent=build_signing_entitlements(source_entitlements,allowed,identifier,team_id,expected_get_task_allow,skipped_entitlements,registered_app_id)
+    ent=build_signing_entitlements(source_entitlements,allowed,identifier,team_id,expected_get_task_allow,skipped_entitlements,registered_app_id,app_groups_override)
     if allowed.get(EVA) is not True:
         print(f"::warning::Profile for {identifier} does not authorize {EVA}; signature will be valid only for allowed entitlements and the known startup crash may remain.")
     if identifier.startswith("com.tling0001.chrome"):
@@ -648,6 +655,14 @@ def main():
     certificate_type="IOS_DEVELOPMENT" if mode=="development" else "IOS_DISTRIBUTION"
     profile_type="IOS_APP_DEVELOPMENT" if mode=="development" else "IOS_APP_ADHOC"
     expected_get_task_allow=(mode=="development")
+    app_groups_raw=env("APP_GROUPS_OVERRIDE")
+    app_groups_override=None
+    if app_groups_raw:
+        app_groups_override=list(dict.fromkeys(item.strip() for item in app_groups_raw.split(",") if item.strip()))
+        invalid_groups=[group for group in app_groups_override if not re.fullmatch(r"group\.[A-Za-z0-9.-]+",group)]
+        if not app_groups_override or invalid_groups:
+            raise RuntimeError("APP_GROUPS_OVERRIDE must be a comma-separated list of valid group.* identifiers.")
+        print("Overriding App Group entitlements on every app/extension bundle with: "+", ".join(app_groups_override))
     minimum_ios_version=env("MINIMUM_IOS_VERSION")
     if minimum_ios_version:
         if not re.fullmatch(r"\d+(?:\.\d+){0,3}",minimum_ios_version):
@@ -822,7 +837,13 @@ def main():
             requested["com.apple.developer.kernel.increased-memory-limit"]=True
             source_entitlements_by_updated[identifier]=requested
             print("::notice::Added Reynard's documented increased-memory-limit entitlement requirement because the unsigned source IPA did not carry entitlement metadata.")
+        if app_groups_override is not None:
+            requested=dict(requested)
+            requested["com.apple.security.application-groups"]=list(app_groups_override)
+            source_entitlements_by_updated[identifier]=requested
         detected_capabilities=capabilities_for_entitlements(requested)
+        if app_groups_override is not None and "APP_GROUPS" not in detected_capabilities:
+            detected_capabilities.append("APP_GROUPS")
         skipped_capabilities=set()
         if uses_wildcard_app_id:
             # Apple's wildcard App IDs cannot enable explicit app capabilities.
@@ -849,6 +870,8 @@ def main():
                 skipped_entitlements_by_bundle.setdefault(identifier,set()).add("com.apple.developer.authentication-services.autofill-credential-provider")
             else:
                 if not apple.ensure_capability(app_id,"APP_GROUPS",identifier):
+                    if app_groups_override is not None:
+                        raise RuntimeError(f"Could not enable App Groups for {identifier}; cannot apply APP_GROUPS_OVERRIDE.")
                     skipped_entitlements_by_bundle.setdefault(identifier,set()).add("com.apple.security.application-groups")
                 if bundle == root or identifier.endswith(".CredentialProviderExtension"):
                     if not apple.ensure_capability(app_id,"AUTOFILL_CREDENTIAL_PROVIDER",identifier):
@@ -868,11 +891,18 @@ def main():
             if key in ENTITLEMENT_CAPABILITIES
             and key not in skipped_entitlements_by_bundle.get(identifier,set())
         ]
+        if app_groups_override is not None and "com.apple.security.application-groups" not in required_profile_entitlements:
+            required_profile_entitlements.append("com.apple.security.application-groups")
         data=apple.profile(
             app_name+" "+profile_label,app_id,cert_id,[d["id"] for d in enabled],
             profile,profile_type,required_profile_entitlements
         )
         print(f"Created {profile_label} profile for {identifier} ({data.get('id')}).")
+        if app_groups_override is not None:
+            profile_groups=profile_plist(profile,work).get("Entitlements",{}).get("com.apple.security.application-groups",[])
+            missing_groups=[group for group in app_groups_override if not isinstance(profile_groups,list) or not any(_profile_value_allows(grant,group) for grant in profile_groups)]
+            if missing_groups:
+                raise RuntimeError(f"Generated profile for {identifier} does not authorize App Group(s) {missing_groups!r}. Associate them with this exact App ID in the Apple Developer portal and rerun.")
         if is_reynard and bundle == root:
             profile_entitlements=profile_plist(profile,work).get("Entitlements",{})
             if profile_entitlements.get("com.apple.developer.kernel.increased-memory-limit") is not True:
@@ -910,7 +940,7 @@ def main():
     for bundle in bundles:
         profile=profile_dir/(re.sub(r"[^A-Za-z0-9_.-]","_",bid(bundle))+".mobileprovision")
         identifier=bid(bundle)
-        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id,expected_get_task_allow,source_entitlements_by_updated.get(identifier,{}),skipped_entitlements_by_bundle.get(identifier,set()),registered_app_ids.get(identifier,identifier))
+        sign_bundle(bundle,profile,identity,work,{d.get('attributes',{}).get('udid') for d in enabled},team_id,expected_get_task_allow,source_entitlements_by_updated.get(identifier,{}),skipped_entitlements_by_bundle.get(identifier,set()),registered_app_ids.get(identifier,identifier),app_groups_override)
 
     # Verify each Mach-O independently after its containing bundles have been
     # signed, then verify the complete app seal recursively.
