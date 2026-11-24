@@ -650,6 +650,33 @@ def main():
     root_updated=resolve_root_bundle_id(root_original,custom_main_bundle_id)
     if custom_main_bundle_id:
         print(f"Using explicitly requested custom main app bundle identifier: {root_updated}")
+
+    # First try to register every original identifier unchanged. If Apple's
+    # API rejects any member of the app/extension family, retry the entire
+    # family with a distinct internal identifier ending in .tling. The suffix
+    # is applied to the root before extension suffixes, keeping all embedded
+    # bundles inside the rewritten app namespace (app.tling.extension).
+    exact_registration_failures=[]
+    for bundle in bundles:
+        original=bid(bundle)
+        try:
+            apple.appid(original,display_names_by_original.get(original,original.rsplit(".",1)[-1]))
+        except RuntimeError as error:
+            exact_registration_failures.append((original,str(error)))
+            print(f"::warning::Could not register original App ID {original!r}: {error}")
+    if exact_registration_failures:
+        previous_root=root_updated
+        if not root_updated.endswith(".tling"):
+            root_updated=root_updated+".tling"
+        print(
+            f"::warning::At least one original App ID could not be registered; "
+            f"trying a separate .tling internal bundle-ID family: {previous_root} -> {root_updated}"
+        )
+        for original,detail in exact_registration_failures:
+            print(f"::notice::Original App ID registration failed for {original}: {detail}")
+    else:
+        print("All original app and extension App IDs registered successfully; keeping the original internal bundle IDs.")
+
     is_chromium=root_base.startswith("com.tling0001.chrome")
     is_reynard=(root_base=="com.minh-ton.Reynard")
     if root_updated != root_original:
