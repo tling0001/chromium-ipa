@@ -340,6 +340,42 @@ def appid_with_fallback(apple, identifier, display_name):
     details="; ".join(f"{candidate}: {error}" for candidate,error in failures)
     raise RuntimeError(f"Could not register an original, .tling-suffixed, or wildcard App ID for {identifier!r}. Attempts: {details}")
 
+def appid_for_embedded_bundle(apple, identifier, display_name, root_identifier, registered_root_id):
+    """Register extensions beneath the main app's selected App ID namespace."""
+    if not identifier.startswith(root_identifier + "."):
+        raise RuntimeError(
+            f"Embedded bundle ID {identifier!r} is not a child of main app ID {root_identifier!r}."
+        )
+    suffix = identifier[len(root_identifier):]
+    if registered_root_id.endswith(".*"):
+        candidates = wildcard_app_id_fallbacks(identifier)
+    else:
+        # If the main app needed the .tling fallback, place that component
+        # immediately after the main app ID, before the extension suffix:
+        # com.example.App.tling.ShareExtension (not ...ShareExtension.tling).
+        candidates = [registered_root_id + suffix, *wildcard_app_id_fallbacks(identifier)]
+    failures = []
+    for candidate in dict.fromkeys(candidates):
+        try:
+            app_id = apple.appid(candidate, display_name)
+            if candidate == registered_root_id + suffix:
+                print(
+                    f"Using embedded App ID {candidate!r} for internal bundle ID {identifier!r}."
+                )
+            else:
+                print(
+                    f"::warning::Using wildcard App ID {candidate!r} for embedded bundle ID {identifier!r}."
+                )
+            return app_id, candidate
+        except RuntimeError as error:
+            failures.append((candidate, str(error)))
+            print(f"::warning::Could not register embedded App ID {candidate!r}: {error}")
+    details = "; ".join(f"{candidate}: {error}" for candidate, error in failures)
+    raise RuntimeError(
+        f"Could not register embedded App ID for {identifier!r} under main App ID "
+        f"{registered_root_id!r}. Attempts: {details}"
+    )
+
 def resolve_root_bundle_id(source_identifier, custom_identifier=""):
     """Preserve the source bundle ID unless an explicit custom ID was requested."""
     custom_identifier=custom_identifier.strip()
@@ -755,12 +791,27 @@ def main():
     display_names_by_updated={rewritten[original]:value for original,value in display_names_by_original.items()}
     skipped_entitlements_by_bundle={}
     registered_app_ids={}
+    # Register the main app first. Every embedded extension's Apple App ID
+    # must remain beneath this selected main App ID namespace. In particular,
+    # when the main app uses the .tling fallback, extensions become
+    # <main-id>.tling.<extension-suffix>, not <extension-id>.tling.
+    root_identifier=bid(root)
+    root_app_id,root_registered_app_id=appid_with_fallback(
+        apple,root_identifier,
+        display_names_by_updated.get(root_identifier,root_identifier.rsplit(".",1)[-1])
+    )
+    registered_app_ids[root_identifier]=root_registered_app_id
     for bundle in bundles:
         identifier=bid(bundle)
-        app_id,registered_app_id=appid_with_fallback(
-            apple,identifier,display_names_by_updated.get(identifier,identifier.rsplit(".",1)[-1])
-        )
-        registered_app_ids[identifier]=registered_app_id
+        if bundle == root:
+            app_id,registered_app_id=root_app_id,root_registered_app_id
+        else:
+            app_id,registered_app_id=appid_for_embedded_bundle(
+                apple,identifier,
+                display_names_by_updated.get(identifier,identifier.rsplit(".",1)[-1]),
+                root_identifier,root_registered_app_id
+            )
+            registered_app_ids[identifier]=registered_app_id
         uses_wildcard_app_id=registered_app_id.endswith(".*")
         requested=source_entitlements_by_updated.get(identifier,{})
         if is_reynard and bundle == root and "com.apple.developer.kernel.increased-memory-limit" not in requested:
