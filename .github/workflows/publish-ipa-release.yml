@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: ''
+      minimum_ios_version:
+        description: Optional MinimumOSVersion override (for example 15.0); blank keeps the IPA's original value
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -73,6 +78,7 @@ jobs:
           APPLE_AUTO_SIGNING_DEV_P12_BASE64: ${{ secrets.APPLE_AUTO_SIGNING_DEV_P12_BASE64 }}
           APPLE_AUTO_SIGNING_DEV_P12_PASSWORD: ${{ secrets.APPLE_AUTO_SIGNING_DEV_P12_PASSWORD }}
           CUSTOM_MAIN_BUNDLE_ID: ${{ inputs.custom_main_bundle_id }}
+          MINIMUM_IOS_VERSION: ${{ inputs.minimum_ios_version }}
         run: |
           set -euo pipefail
           python scripts/apple_sign_ipa.py release/input.ipa release/signed.ipa "$SIGNING_MODE"
@@ -144,6 +150,7 @@ jobs:
               app_name = bundle_id.removesuffix(".tling").split(".")[-1]
           app_name = " ".join(app_name.split())
           version = str(info.get("CFBundleShortVersionString") or info.get("CFBundleVersion") or "").strip()
+          minimum_ios_version = str(info.get("MinimumOSVersion") or "").strip()
           if not bundle_id or not version:
               raise SystemExit("The signed IPA is missing CFBundleIdentifier or app version metadata.")
           custom_bundle_id = os.environ.get("CUSTOM_MAIN_BUNDLE_ID", "").strip()
@@ -211,6 +218,7 @@ jobs:
           **App name:** {app_name}
           **Bundle ID:** `{bundle_id}`
           **App version:** `{version}`
+          **Minimum iOS version:** `{minimum_ios_version or "Not specified"}`
           **Signing mode:** `{signing_mode}`
 
           App icon: `app-icon.png` (included when the IPA contains AppIcon60x60@2x.png).
