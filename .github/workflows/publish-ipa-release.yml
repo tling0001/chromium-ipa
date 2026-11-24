@@ -24,7 +24,7 @@ on:
         type: string
         default: ''
       minimum_ios_version:
-        description: Optional MinimumOSVersion override (for example 15.0); blank keeps the IPA's original value
+        description: Optional MinimumOSVersion override (for example 15.0); metadata only, does not backport newer APIs
         required: false
         type: string
         default: ''
@@ -220,6 +220,8 @@ jobs:
           **App version:** `{version}`
           **Minimum iOS version:** `{minimum_ios_version or "Not specified"}`
           **Signing mode:** `{signing_mode}`
+
+          **Compatibility note:** Changing MinimumOSVersion only changes the app's declared deployment minimum. It does not backport APIs or rebuild bundled binaries; the app may still fail to launch or work on older iOS versions.
 
           App icon: `app-icon.png` (included when the IPA contains AppIcon60x60@2x.png).
           Assets: `{ipa_name}`, `manifest.plist`, and optional `app-icon.png`.
