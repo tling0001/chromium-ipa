@@ -340,6 +340,14 @@ def is_macho(path):
         return False
     description=run("file","-b",str(path),capture=True)
     return "Mach-O" in description
+
+def has_valid_signature(path):
+    """Return true only when an existing code signature passes strict verification."""
+    result=subprocess.run(
+        ["codesign","--verify","--strict",str(path)],
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True
+    )
+    return result.returncode == 0
 def _load_entitlement_plist(raw):
     try:
         value=plistlib.loads(raw)
@@ -775,8 +783,11 @@ def main():
         raise RuntimeError("No Mach-O code was found inside the app; refusing to emit an unsigned IPA.")
     print(f"Found {len(macho_files)} Mach-O code file(s) by file type.")
     for p in sorted(macho_files,key=lambda x:len(x.parts),reverse=True):
+        if has_valid_signature(p):
+            print("Already signed; keeping existing Mach-O signature:",p.relative_to(root))
+            continue
         run("codesign","--force","--sign",identity,"--timestamp=none",str(p))
-        print("Signed Mach-O:",p.relative_to(root))
+        print("Signed previously unsigned or invalid Mach-O:",p.relative_to(root))
 
     # Frameworks are bundles, so sign them after their inner Mach-O files.
     frameworks=sorted(
@@ -784,6 +795,9 @@ def main():
         key=lambda x:len(x.parts),reverse=True
     )
     for framework in frameworks:
+        if has_valid_signature(framework):
+            print("Framework signature remains valid; keeping existing signature:",framework.relative_to(root))
+            continue
         run("codesign","--force","--sign",identity,"--timestamp=none",str(framework))
         run("codesign","--verify","--strict","--verbose=2",str(framework))
 
