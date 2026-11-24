@@ -846,6 +846,11 @@ def main():
             detected_capabilities.append("APP_GROUPS")
         skipped_capabilities=set()
         if uses_wildcard_app_id:
+            if app_groups_override is not None:
+                raise RuntimeError(
+                    f"Cannot apply APP_GROUPS_OVERRIDE to {identifier}: its selected Apple App ID "
+                    f"{registered_app_id!r} is a wildcard. App Groups require an explicit App ID."
+                )
             # Apple's wildcard App IDs cannot enable explicit app capabilities.
             # Keep the IPA's bundle IDs intact and omit only the entitlements
             # that the wildcard provisioning profile cannot authorize.
@@ -858,6 +863,10 @@ def main():
             for capability in detected_capabilities:
                 if not apple.ensure_capability(app_id,capability,identifier):
                     skipped_capabilities.add(capability)
+            if app_groups_override is not None and "APP_GROUPS" in skipped_capabilities:
+                raise RuntimeError(
+                    f"Apple did not enable App Groups for {identifier}; APP_GROUPS_OVERRIDE cannot be applied."
+                )
         skipped_entitlements_by_bundle[identifier]={
             key for key,capability in ENTITLEMENT_CAPABILITIES.items()
             if key in requested and capability in skipped_capabilities
