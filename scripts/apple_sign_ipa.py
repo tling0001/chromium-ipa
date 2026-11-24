@@ -612,6 +612,15 @@ def main():
     certificate_type="IOS_DEVELOPMENT" if mode=="development" else "IOS_DISTRIBUTION"
     profile_type="IOS_APP_DEVELOPMENT" if mode=="development" else "IOS_APP_ADHOC"
     expected_get_task_allow=(mode=="development")
+    minimum_ios_version=env("MINIMUM_IOS_VERSION")
+    if minimum_ios_version:
+        if not re.fullmatch(r"\\d+(?:\\.\\d+){0,3}",minimum_ios_version):
+            raise RuntimeError("MINIMUM_IOS_VERSION must be a numeric version such as '15.0' or '16.4.1'.")
+        parts=[int(part) for part in minimum_ios_version.split(".")]
+        if any(part < 0 for part in parts):
+            raise RuntimeError("MINIMUM_IOS_VERSION components must be non-negative.")
+        minimum_ios_version=".".join(str(part) for part in parts)
+        print(f"Overriding MinimumOSVersion in every app/extension bundle to iOS {minimum_ios_version}.")
     print(f"Signing mode: {mode} ({certificate_type}, {profile_type})")
     source,out=Path(sys.argv[1]).resolve(),Path(sys.argv[2]).resolve()
     if not source.is_file(): raise RuntimeError("Input IPA does not exist: "+str(source))
@@ -698,6 +707,13 @@ def main():
             return value
         metadata=rewrite_references(metadata)
         metadata["CFBundleIdentifier"]=updated
+        if minimum_ios_version:
+            previous_minimum=metadata.get("MinimumOSVersion")
+            metadata["MinimumOSVersion"]=minimum_ios_version
+            print(
+                f"Set MinimumOSVersion for {updated}: "
+                f"{previous_minimum or 'not declared'} -> {minimum_ios_version}"
+            )
         info.write_bytes(plistlib.dumps(metadata,fmt=plistlib.FMT_XML,sort_keys=True))
         rewritten[original]=updated
         print(f"Rewrote bundle identifier: {original} -> {updated}")
