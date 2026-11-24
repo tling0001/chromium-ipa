@@ -28,6 +28,11 @@ on:
         required: false
         type: string
         default: ''
+      app_groups:
+        description: Optional comma-separated App Group IDs to apply identically to the main app and every extension; groups must already be enabled for each App ID
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -79,6 +84,7 @@ jobs:
           APPLE_AUTO_SIGNING_DEV_P12_PASSWORD: ${{ secrets.APPLE_AUTO_SIGNING_DEV_P12_PASSWORD }}
           CUSTOM_MAIN_BUNDLE_ID: ${{ inputs.custom_main_bundle_id }}
           MINIMUM_IOS_VERSION: ${{ inputs.minimum_ios_version }}
+          APP_GROUPS_OVERRIDE: ${{ inputs.app_groups }}
         run: |
           set -euo pipefail
           python scripts/apple_sign_ipa.py release/input.ipa release/signed.ipa "$SIGNING_MODE"
