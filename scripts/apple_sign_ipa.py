@@ -305,20 +305,40 @@ def bid(bundle):
     return x
 
 def normalized_root_bundle_id(identifier):
-    """Create an available team-scoped ID, including for Apple's reserved namespace."""
-    base=re.sub(r"(?:\.tling)+$", "", identifier)
-    if not base:
-        raise RuntimeError(f"Cannot derive a valid base bundle identifier from {identifier!r}.")
-    # Apple reserves com.apple.* identifiers. Replace that namespace before
-    # adding our suffix so App Store Connect can register the App ID.
-    if base=="com.apple":
-        base="com.tling0001.apple"
-    elif base.startswith("com.apple."):
-        base="com.tling0001."+base[len("com.apple."):]
-    return base+".tling"
+    """Keep the app's original bundle identifier unchanged."""
+    return identifier
+
+def wildcard_app_id_fallbacks(identifier):
+    """Return Apple's progressively broader wildcard IDs for a bundle identifier."""
+    parts=identifier.split(".")
+    candidates=[]
+    # First fallback: remove only the final component.
+    if len(parts)>=3:
+        candidates.append(".".join(parts[:-1])+".*")
+    # Second fallback: retain only the first two components.
+    if len(parts)>=3:
+        candidates.append(".".join(parts[:2])+".*")
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate != identifier))
+
+def appid_with_fallback(apple, identifier, display_name):
+    """Try the exact App ID first, then the two requested wildcard scopes."""
+    failures=[]
+    for candidate in [identifier,*wildcard_app_id_fallbacks(identifier)]:
+        try:
+            app_id=apple.appid(candidate,display_name)
+            if candidate==identifier:
+                print(f"Using exact App ID: {candidate}")
+            else:
+                print(f"::warning::Exact App ID {identifier!r} could not be registered. Falling back to wildcard App ID {candidate!r}.")
+            return app_id,candidate
+        except RuntimeError as error:
+            failures.append((candidate,str(error)))
+            print(f"::warning::Could not register App ID {candidate!r}: {error}")
+    details="; ".join(f"{candidate}: {error}" for candidate,error in failures)
+    raise RuntimeError(f"Could not register an exact or fallback wildcard App ID for {identifier!r}. Attempts: {details}")
 
 def resolve_root_bundle_id(source_identifier, custom_identifier=""):
-    """Use a caller-supplied explicit App ID verbatim, or the default .tling ID."""
+    """Preserve the source bundle ID unless an explicit custom ID was requested."""
     custom_identifier=custom_identifier.strip()
     if not custom_identifier:
         return normalized_root_bundle_id(source_identifier)
@@ -537,8 +557,8 @@ def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_
     identifier=bid(bundle); appid=allowed.get("application-identifier","")
     prefix=appid.split(".",1)[0]
     expected_appid=prefix+"."+identifier
-    if not prefix or appid != expected_appid:
-        raise RuntimeError(f"Provisioning profile application-identifier mismatch for {identifier}: expected {expected_appid!r}, got {appid!r}.")
+    if not prefix or not _profile_value_allows(appid,expected_appid):
+        raise RuntimeError(f"Provisioning profile application-identifier mismatch for {identifier}: expected exact or wildcard authorization for {expected_appid!r}, got {appid!r}.")
     prefixes=data.get("ApplicationIdentifierPrefix",[])
     teams=data.get("TeamIdentifier",[])
     if prefix not in prefixes or team_id not in teams or allowed.get("com.apple.developer.team-identifier") != team_id:
@@ -618,22 +638,18 @@ def main():
     if len(set(identifiers)) != len(identifiers):
         raise RuntimeError("The source IPA contains duplicate app/extension bundle identifiers.")
 
-    # Namespace the containing app once, then preserve that prefix for every
-    # embedded executable bundle. App extension IDs must begin with the
-    # containing app's bundle ID; appending ".tling" independently to each
-    # original ID breaks that required parent/extension relationship.
+    # Preserve the source bundle IDs. App Store Connect registration is
+    # attempted with each exact identifier first; wildcard App IDs are only
+    # used as progressively broader provisioning fallbacks.
     root_info=plistlib.loads((root/"Info.plist").read_bytes())
     root_original=root_info.get("CFBundleIdentifier")
     if not root_original:
         raise RuntimeError("Main app is missing CFBundleIdentifier.")
-    # Normalize any number of previously appended suffixes to exactly one.
-    # This makes re-signing an already processed IPA idempotent and repairs
-    # artifacts produced by older runs that appended the namespace repeatedly.
     root_base=re.sub(r"(?:\.tling)+$", "", root_original)
     custom_main_bundle_id=env("CUSTOM_MAIN_BUNDLE_ID")
     root_updated=resolve_root_bundle_id(root_original,custom_main_bundle_id)
     if custom_main_bundle_id:
-        print(f"Using custom main app bundle identifier without adding .tling: {root_updated}")
+        print(f"Using explicitly requested custom main app bundle identifier: {root_updated}")
     is_chromium=root_base.startswith("com.tling0001.chrome")
     is_reynard=(root_base=="com.minh-ton.Reynard")
     if root_updated != root_original:
@@ -649,9 +665,6 @@ def main():
             updated=root_updated
         elif original.startswith(root_original+"."):
             child_suffix=original[len(root_original):]
-            # Older versions appended .tling independently to each extension.
-            # Remove that trailing marker while retaining the extension name.
-            child_suffix=re.sub(r"(?:\.tling)+$", "", child_suffix)
             updated=root_updated+child_suffix
         else:
             raise RuntimeError(
@@ -673,7 +686,6 @@ def main():
                     return root_updated
                 if value.startswith(root_original+"."):
                     child_suffix=value[len(root_original):]
-                    child_suffix=re.sub(r"(?:\.tling)+$", "", child_suffix)
                     return root_updated+child_suffix
             return value
         metadata=rewrite_references(metadata)
@@ -719,7 +731,11 @@ def main():
     display_names_by_updated={rewritten[original]:value for original,value in display_names_by_original.items()}
     skipped_entitlements_by_bundle={}
     for bundle in bundles:
-        identifier=bid(bundle); app_id=apple.appid(identifier,display_names_by_updated.get(identifier,identifier.rsplit(".",1)[-1]))
+        identifier=bid(bundle)
+        app_id,registered_app_id=appid_with_fallback(
+            apple,identifier,display_names_by_updated.get(identifier,identifier.rsplit(".",1)[-1])
+        )
+        uses_wildcard_app_id=registered_app_id.endswith(".*")
         requested=source_entitlements_by_updated.get(identifier,{})
         if is_reynard and bundle == root and "com.apple.developer.kernel.increased-memory-limit" not in requested:
             # Reynard's upstream 0.22.x build declares this requirement in its
@@ -730,13 +746,20 @@ def main():
             source_entitlements_by_updated[identifier]=requested
             print("::notice::Added Reynard's documented increased-memory-limit entitlement requirement because the unsigned source IPA did not carry entitlement metadata.")
         detected_capabilities=capabilities_for_entitlements(requested)
-        if detected_capabilities:
-            capability_list=", ".join(detected_capabilities)
-            print(f"Entitlement capability requests for {identifier}: {capability_list}")
         skipped_capabilities=set()
-        for capability in detected_capabilities:
-            if not apple.ensure_capability(app_id,capability,identifier):
-                skipped_capabilities.add(capability)
+        if uses_wildcard_app_id:
+            # Apple's wildcard App IDs cannot enable explicit app capabilities.
+            # Keep the IPA's bundle IDs intact and omit only the entitlements
+            # that the wildcard provisioning profile cannot authorize.
+            skipped_capabilities.update(detected_capabilities)
+            print(f"::warning::Using wildcard App ID {registered_app_id} for {identifier}; explicit capabilities cannot be enabled on wildcard App IDs and their corresponding entitlements will be omitted.")
+        else:
+            if detected_capabilities:
+                capability_list=", ".join(detected_capabilities)
+                print(f"Entitlement capability requests for {identifier}: {capability_list}")
+            for capability in detected_capabilities:
+                if not apple.ensure_capability(app_id,capability,identifier):
+                    skipped_capabilities.add(capability)
         skipped_entitlements_by_bundle[identifier]={
             key for key,capability in ENTITLEMENT_CAPABILITIES.items()
             if key in requested and capability in skipped_capabilities
@@ -744,11 +767,15 @@ def main():
         # Preserve the known Chromium integrations even when an upstream
         # unsigned IPA omitted its original entitlement metadata.
         if is_chromium:
-            if not apple.ensure_capability(app_id,"APP_GROUPS",identifier):
+            if uses_wildcard_app_id:
                 skipped_entitlements_by_bundle.setdefault(identifier,set()).add("com.apple.security.application-groups")
-            if bundle == root or identifier.endswith(".CredentialProviderExtension"):
-                if not apple.ensure_capability(app_id,"AUTOFILL_CREDENTIAL_PROVIDER",identifier):
-                    skipped_entitlements_by_bundle.setdefault(identifier,set()).add("com.apple.developer.authentication-services.autofill-credential-provider")
+                skipped_entitlements_by_bundle.setdefault(identifier,set()).add("com.apple.developer.authentication-services.autofill-credential-provider")
+            else:
+                if not apple.ensure_capability(app_id,"APP_GROUPS",identifier):
+                    skipped_entitlements_by_bundle.setdefault(identifier,set()).add("com.apple.security.application-groups")
+                if bundle == root or identifier.endswith(".CredentialProviderExtension"):
+                    if not apple.ensure_capability(app_id,"AUTOFILL_CREDENTIAL_PROVIDER",identifier):
+                        skipped_entitlements_by_bundle.setdefault(identifier,set()).add("com.apple.developer.authentication-services.autofill-credential-provider")
         unmapped=sorted(key for key in requested if key not in ENTITLEMENT_CAPABILITIES and key not in {
             "application-identifier","com.apple.developer.team-identifier","get-task-allow",
             "keychain-access-groups"
