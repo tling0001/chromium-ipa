@@ -152,8 +152,11 @@ jobs:
                   raise SystemExit(
                       f"Signed main bundle ID '{bundle_id}' does not match requested custom ID '{custom_bundle_id}'."
                   )
-          elif not bundle_id.endswith(".tling") or bundle_id.removesuffix(".tling").endswith(".tling"):
-              raise SystemExit(f"Bundle ID '{bundle_id}' must end in exactly one .tling suffix after signing.")
+          # The signed IPA keeps its original internal CFBundleIdentifier.
+          # The .tling suffix, when needed, belongs only to the App ID registered
+          # with Apple and must not be expected in the app's own metadata.
+          elif not bundle_id:
+              raise SystemExit("The signed IPA has an empty main app bundle identifier.")
 
           release_name = f"{bundle_id} - {version}"
           ipa_name = f"{bundle_id}-{version}.ipa"
@@ -180,7 +183,7 @@ jobs:
                       "bundle-identifier": bundle_id,
                       "bundle-version": version,
                       "kind": "software",
-                      "title": info.get("CFBundleDisplayName") or info.get("CFBundleName") or bundle_id
+                      "title": app_name
                   }
               }]
           }
