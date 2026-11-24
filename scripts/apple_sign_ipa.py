@@ -839,8 +839,18 @@ def main():
             print("::notice::Added Reynard's documented increased-memory-limit entitlement requirement because the unsigned source IPA did not carry entitlement metadata.")
         if app_groups_override is not None:
             requested=dict(requested)
+            original_groups=requested.get("com.apple.security.application-groups",[])
+            original_groups=original_groups if isinstance(original_groups,list) else []
+            removed_groups=sorted(set(group for group in original_groups if group not in app_groups_override))
             requested["com.apple.security.application-groups"]=list(app_groups_override)
             source_entitlements_by_updated[identifier]=requested
+            if removed_groups:
+                print(
+                    f"Replacing App Groups for {identifier}; removing groups not in the override: "
+                    + ", ".join(str(group) for group in removed_groups)
+                )
+            else:
+                print(f"Setting the exact App Group list for {identifier}: "+", ".join(app_groups_override))
         detected_capabilities=capabilities_for_entitlements(requested)
         if app_groups_override is not None and "APP_GROUPS" not in detected_capabilities:
             detected_capabilities.append("APP_GROUPS")
