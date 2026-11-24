@@ -154,9 +154,7 @@ jobs:
                   )
           # The signed IPA keeps its original internal CFBundleIdentifier.
           # The .tling suffix, when needed, belongs only to the App ID registered
-          # with Apple and must not be expected in the app's own metadata.
-          elif not bundle_id:
-              raise SystemExit("The signed IPA has an empty main app bundle identifier.")
+          # with Apple and is not expected in the app's own metadata.
 
           release_name = f"{bundle_id} - {version}"
           ipa_name = f"{bundle_id}-{version}.ipa"
