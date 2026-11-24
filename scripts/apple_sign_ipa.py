@@ -614,7 +614,7 @@ def main():
     expected_get_task_allow=(mode=="development")
     minimum_ios_version=env("MINIMUM_IOS_VERSION")
     if minimum_ios_version:
-        if not re.fullmatch(r"\\d+(?:\\.\\d+){0,3}",minimum_ios_version):
+        if not re.fullmatch(r"\d+(?:\.\d+){0,3}",minimum_ios_version):
             raise RuntimeError("MINIMUM_IOS_VERSION must be a numeric version such as '15.0' or '16.4.1'.")
         parts=[int(part) for part in minimum_ios_version.split(".")]
         if any(part < 0 for part in parts):
