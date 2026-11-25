@@ -29,7 +29,12 @@ on:
         type: string
         default: ''
       app_groups:
-        description: Optional comma-separated App Group IDs to apply identically to the main app and every extension; groups must already be enabled for each App ID
+        description: Optional comma-separated App Group IDs to apply identically to the main app and every Extension; groups must already be enabled for each App ID
+        required: false
+        type: string
+        default: ''
+      app_icon_url:
+        description: Optional URL to download a custom release app icon as app-icon.png (overrides the IPA-extracted icon)
         required: false
         type: string
         default: ''
@@ -246,6 +251,17 @@ jobs:
               f.write(f"ipa_asset_url={ipa_asset_url}\n")
               f.write(f"icon_available={'true' if icon_bytes else 'false'}\n")
           PY
+
+      - name: Download custom app icon (optional)
+        if: inputs.app_icon_url != ''
+        shell: bash
+        env:
+          APP_ICON_URL: ${{ inputs.app_icon_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          curl --location --retry 3 --retry-all-errors --max-time 120 \\
+            --output release/app-icon.png "$APP_ICON_URL"
 
       - name: Create GitHub release and upload IPA + manifest
         shell: bash
