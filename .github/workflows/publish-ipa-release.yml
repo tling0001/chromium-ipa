@@ -29,7 +29,7 @@ on:
         type: string
         default: ''
       app_groups:
-        description: Optional comma-separated App Group IDs to apply identically to the main app and every Extension; groups must already be enabled for each App ID
+        description: Optional comma-separated App Group IDs to apply identically to the main app and every extension; groups must already be enabled for each App ID
         required: false
         type: string
         default: ''
@@ -260,7 +260,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          curl --location --retry 3 --retry-all-errors --max-time 120 \\
+          curl --fail --location --retry 3 --retry-all-errors --max-time 120 \\
             --output release/app-icon.png "$APP_ICON_URL"
 
       - name: Create GitHub release and upload IPA + manifest
