@@ -777,8 +777,6 @@ def main():
         )
     if any(not identifier.startswith(root_updated + ".") and identifier != root_updated for identifier in identifiers):
         raise RuntimeError("Internal error: an embedded executable bundle is outside the rewritten main app bundle-ID namespace.")
-    if custom_main_bundle_id and root_original == root_updated:
-        raise RuntimeError("Custom main bundle ID was supplied but the source bundle ID remained unchanged.")
 
     # Provisioning starts only after the IPA's IDs pass the ownership check
     # and all bundle identifiers have been rewritten.
