@@ -648,7 +648,7 @@ def sign_bundle(bundle,profile,identity,work,enabled_udids,team_id,expected_get_
         raise RuntimeError(f"Final code signature metadata mismatch for {identifier}: {signature[-1800:]}")
 
 def main():
-    if len(sys.argv) not in (3,4): raise SystemExit("usage: apple_sign_ipa.py INPUT.ipa OUTPUT.ipa [adhoc|development]")
+    if len(sys.argv) not in (3,4,5): raise SystemExit("usage: apple_sign_ipa.py INPUT.ipa OUTPUT.ipa [adhoc|development] [CUSTOM_MAIN_BUNDLE_ID]")
     mode=(sys.argv[3] if len(sys.argv)==4 else env("SIGNING_MODE","adhoc")).lower()
     if mode not in ("adhoc","development"):
         raise RuntimeError("SIGNING_MODE must be either 'adhoc' or 'development'.")
@@ -709,7 +709,7 @@ def main():
     if not root_original:
         raise RuntimeError("Main app is missing CFBundleIdentifier.")
     root_base=re.sub(r"(?:\.tling)+$", "", root_original)
-    custom_main_bundle_id=env("CUSTOM_MAIN_BUNDLE_ID")
+    custom_main_bundle_id=(sys.argv[4].strip() if len(sys.argv)==5 else env("CUSTOM_MAIN_BUNDLE_ID"))
     root_updated=resolve_root_bundle_id(root_original,custom_main_bundle_id)
     if custom_main_bundle_id:
         print(f"Using explicitly requested custom main app bundle identifier: {root_updated}")
@@ -770,8 +770,15 @@ def main():
         print(f"Rewrote bundle identifier: {original} -> {updated}")
 
     identifiers=[bid(bundle) for bundle in bundles]
-    if any(not identifier.startswith(root_updated) for identifier in identifiers):
+    if bid(root) != root_updated:
+        raise RuntimeError(
+            f"Main app bundle ID override was not applied: expected {root_updated!r}, "
+            f"found {bid(root)!r}."
+        )
+    if any(not identifier.startswith(root_updated + ".") and identifier != root_updated for identifier in identifiers):
         raise RuntimeError("Internal error: an embedded executable bundle is outside the rewritten main app bundle-ID namespace.")
+    if custom_main_bundle_id and root_original == root_updated:
+        raise RuntimeError("Custom main bundle ID was supplied but the source bundle ID remained unchanged.")
 
     # Provisioning starts only after the IPA's IDs pass the ownership check
     # and all bundle identifiers have been rewritten.
