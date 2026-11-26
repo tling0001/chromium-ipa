@@ -92,7 +92,7 @@ jobs:
           APP_GROUPS_OVERRIDE: ${{ inputs.app_groups }}
         run: |
           set -euo pipefail
-          python scripts/apple_sign_ipa.py release/input.ipa release/signed.ipa "$SIGNING_MODE"
+          python scripts/apple_sign_ipa.py release/input.ipa release/signed.ipa "$SIGNING_MODE" "$CUSTOM_MAIN_BUNDLE_ID"
 
       - name: Read signed app metadata and create OTA manifest
         id: metadata
