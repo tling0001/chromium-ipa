@@ -941,23 +941,20 @@ def main():
         raise RuntimeError("No Mach-O code was found inside the app; refusing to emit an unsigned IPA.")
     print(f"Found {len(macho_files)} Mach-O code file(s) by file type.")
     for p in sorted(macho_files,key=lambda x:len(x.parts),reverse=True):
-        if has_valid_signature(p):
-            print("Already signed; keeping existing Mach-O signature:",p.relative_to(root))
-            continue
+        # Always replace existing signatures so every code object is signed
+        # consistently with the signing identity selected for this workflow.
         run("codesign","--force","--sign",identity,"--timestamp=none",str(p))
-        print("Signed previously unsigned or invalid Mach-O:",p.relative_to(root))
+        print("Resigned Mach-O:",p.relative_to(root))
 
-    # Frameworks are bundles, so sign them after their inner Mach-O files.
+    # Frameworks are bundles, so resign them after their inner Mach-O files.
     frameworks=sorted(
         (p for p in root.rglob("*.framework") if p.is_dir()),
         key=lambda x:len(x.parts),reverse=True
     )
     for framework in frameworks:
-        if has_valid_signature(framework):
-            print("Framework signature remains valid; keeping existing signature:",framework.relative_to(root))
-            continue
         run("codesign","--force","--sign",identity,"--timestamp=none",str(framework))
         run("codesign","--verify","--strict","--verbose=2",str(framework))
+        print("Resigned framework:",framework.relative_to(root))
 
     # Provisioned .appex/.app bundles are signed last, deepest first, with the
     # exact entitlements authorized by their matching Ad Hoc profiles.
