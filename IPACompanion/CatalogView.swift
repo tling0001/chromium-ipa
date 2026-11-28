@@ -129,6 +129,17 @@ struct AppRow:View{
 }
 
 struct ReleaseDetail:View{
+    // Release descriptions sometimes arrive with Markdown punctuation escaped
+    // (for example \\*\\*bold\\*\\*). Undo those transport escapes before
+    // parsing so MarkdownUI can render the original formatting.
+    private static func unescapeMarkdown(_ source:String)->String {
+        source.replacingOccurrences(
+            of: #"\\\\([\\\\`*_{}\\[\\]()#+\\-.!>])"#,
+            with: "$1",
+            options: .regularExpression
+        )
+    }
+
     let app:ReleaseApp
     @ObservedObject var model:CatalogModel
     @State private var installedVersion=""
@@ -145,7 +156,7 @@ struct ReleaseDetail:View{
                 if let ipa=app.ipa{Link("Download IPA",destination:ipa.browser_download_url)};Link("View release on GitHub",destination:app.html_url)
             }
             Section("Limitations"){Text("iOS cannot automatically enumerate all installed apps or silently replace app binaries. Tracking is manual. OTA installation may replace an existing app only when signing, bundle ID and provisioning are compatible.")}
-            if let notes=app.body,!notes.isEmpty{Section("Release notes"){Markdown(notes).textSelection(.enabled)}}
+            if let notes=app.body,!notes.isEmpty{Section("Release notes"){Markdown(Self.unescapeMarkdown(notes)).textSelection(.enabled)}}
         }.navigationTitle(app.appName).navigationBarTitleDisplayMode(.inline)}
     }
 }
