@@ -74,7 +74,7 @@ struct AppListRow:View{
     var body:some View{
         HStack(spacing:12){
             Button(action:select){AppRow(app:app,trackedVersion:model.trackedVersion(app),updateAvailable:model.hasUpdate(app)).contentShape(Rectangle())}.buttonStyle(.plain)
-            if app.signingMode == "adhoc" {
+            if app.signingMode.replacingOccurrences(of: " ", with: "") == "adhoc" {
                 if let ota=app.otaURL {
                     Link(destination:ota){Label("Install",systemImage:"arrow.down.app").font(.subheadline.weight(.semibold))}
                         .buttonStyle(.borderedProminent).controlSize(.regular).fixedSize()
