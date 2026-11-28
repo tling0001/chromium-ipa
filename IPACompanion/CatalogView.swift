@@ -154,13 +154,8 @@ struct ReleaseDetail:View{
                     .frame(width:54,height:54)
                     .clipShape(RoundedRectangle(cornerRadius:13))
                     .background(.thinMaterial,in:RoundedRectangle(cornerRadius:13))
-                    VStack(alignment:.leading,spacing:4){
-                        Text(app.appName).font(.headline)
-                        Text(app.bundleID ?? "").font(.caption).foregroundStyle(.secondary)
-                        Text("Version \\(app.appVersion ?? app.tag_name)").font(.subheadline)
-                        if let tracked=model.trackedVersion(app){Text("Installed \\(tracked)").font(.caption).foregroundStyle(model.hasUpdate(app) ? .orange:.secondary)}
-                        if model.hasUpdate(app){Label("Update available",systemImage:"arrow.up.circle.fill").font(.caption).foregroundStyle(.orange)}
-                    }
+                    Text(app.appName).font(.headline)
+                        .lineLimit(2)
                     Spacer(minLength:4)
                     if let ota=app.otaURL{InstallPill(url:ota)}
                 }
