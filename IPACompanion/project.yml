@@ -1,4 +1,8 @@
 name: IPACompanion
+packages:
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    from: 2.4.1
 options:
   bundleIdPrefix: com.tling0001
   deploymentTarget:
@@ -7,6 +11,8 @@ targets:
   IPACompanion:
     type: application
     platform: iOS
+    dependencies:
+      - package: MarkdownUI
     sources:
       - path: .
         includes:
