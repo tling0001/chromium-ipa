@@ -24,7 +24,30 @@ jobs:
           mkdir -p artifacts/ipa/Payload artifacts/simulator
           APP_PATH="build/Build/Products/Release-iphoneos/IPACompanion.app"
           test -d "$APP_PATH"
+          INFO_PLIST="$APP_PATH/Info.plist"
+          test -f "$INFO_PLIST"
+          # XcodeGen's INFOPLIST_KEY_* values are not reliably emitted by every
+          # Xcode version when GENERATE_INFOPLIST_FILE is enabled. Stamp the
+          # canonical version fields into the built product before packaging.
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.tling0001.IPACompanion" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.tling0001.IPACompanion" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$INFO_PLIST"
+          echo "Unsigned app metadata:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST"
           ditto "$APP_PATH" artifacts/ipa/Payload/IPACompanion.app
+          COPIED_PLIST="artifacts/ipa/Payload/IPACompanion.app/Info.plist"
+          python3 - "$COPIED_PLIST" <<'PY'
+          import plistlib, sys
+          with open(sys.argv[1], "rb") as f:
+              info = plistlib.load(f)
+          required = ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion")
+          missing = [key for key in required if not str(info.get(key, "")).strip()]
+          if missing:
+              raise SystemExit("Unsigned IPA app metadata missing: " + ", ".join(missing))
+          print("Verified unsigned IPA metadata:", {key: info[key] for key in required})
+          PY
           rm -rf artifacts/ipa/Payload/IPACompanion.app/_CodeSignature
           rm -f artifacts/ipa/Payload/IPACompanion.app/embedded.mobileprovision
           cd artifacts/ipa
