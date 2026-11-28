@@ -21,6 +21,13 @@ final class CatalogModel: ObservableObject {
         }catch{self.error="Unable to load releases: \(error.localizedDescription)"}
     }
     var catalog:[ReleaseApp]{Dictionary(grouping:releases,by:{$0.bundleID ?? $0.appName}).values.compactMap{$0.sorted{($0.published_at ?? "") > ($1.published_at ?? "")}.first}.sorted{($0.published_at ?? "") > ($1.published_at ?? "")}}
+    func icon(for app:ReleaseApp)->ReleaseApp.Asset? {
+        let key = app.bundleID ?? app.appName
+        return releases
+            .filter { ($0.bundleID ?? $0.appName) == key && $0.icon != nil }
+            .sorted { ($0.published_at ?? "") > ($1.published_at ?? "") }
+            .first?.icon
+    }
     var trackedApps:[ReleaseApp]{catalog.filter{isTracked($0)}}
     var updateApps:[ReleaseApp]{trackedApps.filter{hasUpdate($0)}}
 }
@@ -73,7 +80,7 @@ struct AppListRow:View{
     var select:()->Void
     var body:some View{
         HStack(spacing:12){
-            Button(action:select){AppRow(app:app,trackedVersion:model.trackedVersion(app),updateAvailable:model.hasUpdate(app)).contentShape(Rectangle())}.buttonStyle(.plain)
+            Button(action:select){AppRow(app:app,icon:model.icon(for:app),trackedVersion:model.trackedVersion(app),updateAvailable:model.hasUpdate(app)).contentShape(Rectangle())}.buttonStyle(.plain)
             if app.signingMode.replacingOccurrences(of: " ", with: "") == "adhoc" {
                 if let ota=app.otaURL {
                     Link(destination:ota){Label("Install",systemImage:"arrow.down.app").font(.subheadline.weight(.semibold))}
@@ -96,11 +103,12 @@ struct AppListRow:View{
 
 struct AppRow:View{
     let app:ReleaseApp
+    var icon:ReleaseApp.Asset?=nil
     var trackedVersion:String?=nil
     var updateAvailable:Bool=false
     var body:some View{
         HStack(spacing:14){
-            AsyncImage(url:app.icon?.browser_download_url){image in image.resizable().scaledToFit()}placeholder:{Image(systemName:"app.fill").resizable().scaledToFit().padding(12).foregroundStyle(.secondary)}
+            AsyncImage(url:(icon ?? app.icon)?.browser_download_url){image in image.resizable().scaledToFit()}placeholder:{Image(systemName:"app.fill").resizable().scaledToFit().padding(12).foregroundStyle(.secondary)}
                 .frame(width:54,height:54).clipShape(RoundedRectangle(cornerRadius:13)).background(.thinMaterial,in:RoundedRectangle(cornerRadius:13))
             VStack(alignment:.leading,spacing:4){
                 Text(app.appName).font(.headline);Text(app.bundleID ?? "").font(.caption).foregroundStyle(.secondary);Text("Version \(app.appVersion ?? app.tag_name)").font(.subheadline)
@@ -118,7 +126,7 @@ struct ReleaseDetail:View{
     @State private var installedVersion=""
     var body:some View{
         NavigationStack{List{
-            Section{AppRow(app:app,trackedVersion:model.trackedVersion(app),updateAvailable:model.hasUpdate(app));LabeledContent("Bundle ID",value:app.bundleID ?? "Unknown");LabeledContent("Signing",value:app.signingMode.capitalized);LabeledContent("Version",value:app.appVersion ?? app.tag_name);if let date=app.published_at{LabeledContent("Published",value:date)}}
+            Section{AppRow(app:app,icon:model.icon(for:app),trackedVersion:model.trackedVersion(app),updateAvailable:model.hasUpdate(app));LabeledContent("Bundle ID",value:app.bundleID ?? "Unknown");LabeledContent("Signing",value:app.signingMode.capitalized);LabeledContent("Version",value:app.appVersion ?? app.tag_name);if let date=app.published_at{LabeledContent("Published",value:date)}}
             Section("Track this app"){
                 if let saved=model.trackedVersion(app){LabeledContent("Installed version",value:saved);if model.hasUpdate(app){Label("Update available",systemImage:"arrow.up.circle.fill").foregroundStyle(.orange)};Button("Remove tracking",role:.destructive){model.untrack(app)}}
                 else{TextField("Installed version (e.g. 1.2.3)",text:$installedVersion).textInputAutocapitalization(.never);Button("Save installed version"){model.track(app,installedVersion:installedVersion.trimmingCharacters(in:.whitespaces))}.disabled(installedVersion.trimmingCharacters(in:.whitespaces).isEmpty);Text("Tracking is stored locally.").font(.footnote).foregroundStyle(.secondary)}
