@@ -110,7 +110,7 @@ class Apple:
         # Macs registered for development; include those where Apple allows
         # them to participate in the selected iOS profile.
         out=[]
-        for platform in ("IOS","MAC"):
+        for platform in ("IOS","MAC_OS"):
             out.extend(self.pages(f"/devices?filter[platform]={platform}&limit=200&fields[devices]=name,platform,udid,status"))
         return out
     def appid(self,bid,display_name):
