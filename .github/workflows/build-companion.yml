@@ -48,8 +48,8 @@ jobs:
           test -s "$APP_PATH/Assets.car"
           plutil -lint "$INFO_PLIST"
           test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST")" = "com.tling0001.IPACompanion"
-          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST")" = "1.1"
-          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST")" = "2"
+          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST")" = "1.2"
+          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST")" = "3"
           test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$INFO_PLIST")" = "AppIcon"
 
           echo "Validated Xcode-built app:"
