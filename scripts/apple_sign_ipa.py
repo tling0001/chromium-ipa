@@ -105,7 +105,14 @@ class Apple:
         while url:
             x=self.req("GET",url); out+=x.get("data",[]); url=x.get("links",{}).get("next")
         return out
-    def devices(self): return self.pages("/devices?filter[platform]=IOS&limit=200&fields[devices]=name,platform,udid,status")
+    def devices(self):
+        # Fetch registered iOS and Mac devices separately. Some accounts have
+        # Macs registered for development; include those where Apple allows
+        # them to participate in the selected iOS profile.
+        out=[]
+        for platform in ("IOS","MAC"):
+            out.extend(self.pages(f"/devices?filter[platform]={platform}&limit=200&fields[devices]=name,platform,udid,status"))
+        return out
     def appid(self,bid,display_name):
         # Apple App ID names are stricter than bundle identifiers: use the
         # app/extension's own display name, not the source project name.
