@@ -39,7 +39,7 @@ struct CatalogView: View {
             }
             .navigationTitle("IPA Library")\n            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)\n            .toolbarBackground(.visible, for: .navigationBar)
             .searchable(text:$query,prompt:"Search apps")
-            .toolbar { ToolbarItem(placement:.topBarTrailing){ Button { Task{await model.load()} } label:{Image(systemName:"arrow.clockwise")} .buttonStyle(.glass) } }
+            .toolbar { ToolbarItem(placement:.topBarTrailing){ Button { Task{await model.load()} } label:{Image(systemName:"arrow.clockwise")} .glassButtonCompat() } }
             .task { await model.load() }
             .refreshable { await model.load() }
             .sheet(item:$selected){ app in ReleaseDetail(app:app) }
@@ -92,4 +92,4 @@ struct ReleaseDetail: View {
         }
     }
 }
-\n\nprivate extension View {\n    @ViewBuilder func glassCompat() -> some View {\n        if #available(iOS 26.0, *) { self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18)) }\n        else { self }\n    }\n}\n
+\n\nprivate extension View {\n    @ViewBuilder func glassCompat() -> some View {\n        if #available(iOS 26.0, *) { self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18)) }\n        else { self }\n    }\n    @ViewBuilder func glassButtonCompat() -> some View {\n        if #available(iOS 26.0, *) { self.buttonStyle(.glass) }\n        else { self.buttonStyle(.bordered) }\n    }\n}\n
