@@ -679,6 +679,9 @@ def main():
             raise RuntimeError("MINIMUM_IOS_VERSION components must be non-negative.")
         minimum_ios_version=".".join(str(part) for part in parts)
         print(f"Overriding MinimumOSVersion in every app/extension bundle to iOS {minimum_ios_version}.")
+    skip_nested_code_signing=env("SKIP_NESTED_CODE_SIGNING","false").lower() in ("1","true","yes","on")
+    if skip_nested_code_signing:
+        print("::warning::Nested Mach-O binaries and frameworks will NOT be re-signed. Their existing signatures are preserved; the app and extension bundles will still be signed. This can produce an IPA that will not install or launch if nested code signatures are missing or incompatible.")
     print(f"Signing mode: {mode} ({certificate_type}, {profile_type})")
     source,out=Path(sys.argv[1]).resolve(),Path(sys.argv[2]).resolve()
     if not source.is_file(): raise RuntimeError("Input IPA does not exist: "+str(source))
@@ -944,24 +947,27 @@ def main():
     # such as Frameworks/XUL which have no .dylib or .framework suffix; an
     # extension-based scan silently skipped them and caused dyld to reject XUL.
     macho_files=[p for p in root.rglob("*") if is_macho(p)]
-    if not macho_files:
-        raise RuntimeError("No Mach-O code was found inside the app; refusing to emit an unsigned IPA.")
-    print(f"Found {len(macho_files)} Mach-O code file(s) by file type.")
-    for p in sorted(macho_files,key=lambda x:len(x.parts),reverse=True):
-        # Always replace existing signatures so every code object is signed
-        # consistently with the signing identity selected for this workflow.
-        run("codesign","--force","--sign",identity,"--timestamp=none",str(p))
-        print("Resigned Mach-O:",p.relative_to(root))
-
-    # Frameworks are bundles, so resign them after their inner Mach-O files.
     frameworks=sorted(
         (p for p in root.rglob("*.framework") if p.is_dir()),
         key=lambda x:len(x.parts),reverse=True
     )
-    for framework in frameworks:
-        run("codesign","--force","--sign",identity,"--timestamp=none",str(framework))
-        run("codesign","--verify","--strict","--verbose=2",str(framework))
-        print("Resigned framework:",framework.relative_to(root))
+    if not macho_files:
+        raise RuntimeError("No Mach-O code was found inside the app.")
+    print(f"Found {len(macho_files)} Mach-O code file(s) and {len(frameworks)} framework(s).")
+    if skip_nested_code_signing:
+        print("Skipping all nested Mach-O and framework signing; existing signatures and contents are left untouched.")
+    else:
+        for p in sorted(macho_files,key=lambda x:len(x.parts),reverse=True):
+            # Always replace existing signatures so every code object is signed
+            # consistently with the signing identity selected for this workflow.
+            run("codesign","--force","--sign",identity,"--timestamp=none",str(p))
+            print("Resigned Mach-O:",p.relative_to(root))
+
+        # Frameworks are bundles, so resign them after their inner Mach-O files.
+        for framework in frameworks:
+            run("codesign","--force","--sign",identity,"--timestamp=none",str(framework))
+            run("codesign","--verify","--strict","--verbose=2",str(framework))
+            print("Resigned framework:",framework.relative_to(root))
 
     # Provisioned .appex/.app bundles are signed last, deepest first, with the
     # exact entitlements authorized by their matching Ad Hoc profiles.
@@ -972,14 +978,20 @@ def main():
 
     # Verify each Mach-O independently after its containing bundles have been
     # signed, then verify the complete app seal recursively.
-    for p in macho_files:
-        run("codesign","--verify","--strict","--verbose=2",str(p))
-    run("codesign","--verify","--deep","--strict","--verbose=2",str(root))
+    if not skip_nested_code_signing:
+        for p in macho_files:
+            run("codesign","--verify","--strict","--verbose=2",str(p))
+        run("codesign","--verify","--deep","--strict","--verbose=2",str(root))
+    else:
+        # Verify the top-level app signature without recursively requiring the
+        # nested code objects that this explicit option intentionally preserves.
+        run("codesign","--verify","--strict","--verbose=2",str(root))
     out.parent.mkdir(parents=True,exist_ok=True)
     if out.exists(): out.unlink()
     run("ditto","-c","-k","--sequesterRsrc","--keepParent",str(payload),str(out))
     print(run("shasum","-a","256",str(out),capture=True).strip())
-    print(f"{mode.capitalize()} IPA signed and verified. {len(macho_files)} Mach-O file(s), {len(frameworks)} framework(s), {len(bundles)} app/extension bundle(s), {len(enabled)} registered enabled devices.")
+    nested_status="not re-signed" if skip_nested_code_signing else "signed and verified"
+    print(f"{mode.capitalize()} IPA packaged; nested Mach-O/framework code {nested_status}. {len(macho_files)} Mach-O file(s), {len(frameworks)} framework(s), {len(bundles)} app/extension bundle(s), {len(enabled)} registered enabled devices.")
     if is_chromium:
         print("If App Group warnings appeared, register group.com.tling0001.chrome and group.com.tling0001.common in Certificates, Identifiers & Profiles, then assign both groups to every Chromium app/extension App ID before relying on cross-extension sharing.")
 
