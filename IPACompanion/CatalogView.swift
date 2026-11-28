@@ -44,7 +44,7 @@ struct CatalogView:View{
                     .toolbar{ToolbarItem(placement:.topBarTrailing){Button{Task{await model.load()}}label:{Image(systemName:"arrow.clockwise")}.glassButtonCompat()}}
             }.tabItem{Label("Updates",systemImage:"arrow.up.circle")}.badge(model.updateApps.count)
         }
-        .task{await model.load()}.refreshable{await model.load()}.sheet(item:$selected){app in ReleaseDetail(app:app,model:model)}
+        .task{await model.load()}.refreshable{await model.load()}.sheet(item:$selected){app in ReleaseDetail(app:app,model:model).presentationDetents([.medium,.large]).presentationDragIndicator(.visible)}
     }
     @ViewBuilder private func catalogList(_ apps:[ReleaseApp])->some View{
         if model.loading && model.releases.isEmpty{ProgressView("Loading apps…")}
@@ -74,9 +74,19 @@ struct AppListRow:View{
     var body:some View{
         HStack(spacing:12){
             Button(action:select){AppRow(app:app,trackedVersion:model.trackedVersion(app),updateAvailable:model.hasUpdate(app)).contentShape(Rectangle())}.buttonStyle(.plain)
-            if model.hasUpdate(app),let ota=app.otaURL{
-                Link(destination:ota){Image(systemName:"arrow.down.circle.fill").font(.title2).padding(8)}.accessibilityLabel("Install update")
-            }else{Button(action:select){Image(systemName:"chevron.right").font(.caption).foregroundStyle(.secondary).padding(8)}.buttonStyle(.plain)}
+            if app.signingMode == "adhoc" {
+                if let ota=app.otaURL {
+                    Link(destination:ota){Label("Install",systemImage:"arrow.down.app").font(.subheadline.weight(.semibold))}
+                        .buttonStyle(.borderedProminent).controlSize(.regular).fixedSize()
+                        .accessibilityHint("Install this Ad Hoc app on this device")
+                } else {
+                    Label("No OTA",systemImage:"exclamationmark.circle").font(.caption).foregroundStyle(.secondary)
+                        .accessibilityLabel("Install unavailable: no OTA manifest")
+                }
+            } else {
+                Button(action:select){Image(systemName:"chevron.right").font(.caption).foregroundStyle(.secondary).padding(8)}
+                    .buttonStyle(.plain).accessibilityLabel("App details")
+            }
         }
     }
 }
@@ -94,7 +104,7 @@ struct AppRow:View{
                 if let trackedVersion{Text("Installed \(trackedVersion)").font(.caption).foregroundStyle(updateAvailable ? .orange:.secondary)}
                 if updateAvailable{Label("Update available",systemImage:"arrow.up.circle.fill").font(.caption).foregroundStyle(.orange)}
             }
-            Spacer(minLength:4);Text(app.signingMode.capitalized).font(.caption).padding(6).background(.thinMaterial).clipShape(Capsule())
+            Spacer(minLength:4)
         }.padding(.vertical,4)
     }
 }
