@@ -77,8 +77,14 @@ jobs:
           rm -rf artifacts/ipa/Payload/IPACompanion.app/_CodeSignature
           rm -f artifacts/ipa/Payload/IPACompanion.app/embedded.mobileprovision
           cd artifacts/ipa
-          zip -qry ../IPACompanion-unsigned.ipa Payload
+          # Use Apple's ditto archiver for a deterministic IPA payload archive.
+          # The previous zip invocation returned a non-zero status on the
+          # macOS runner despite completing the preceding metadata checks.
+          ditto -c -k --sequesterRsrc --keepParent Payload ../IPACompanion-unsigned.ipa
           cd ../..
+          test -s artifacts/IPACompanion-unsigned.ipa
+          unzip -tq artifacts/IPACompanion-unsigned.ipa
+          echo "Unsigned IPA packaged and archive integrity verified."
       - name: Build simulator app
         run: xcodebuild -project IPACompanion/IPACompanion.xcodeproj -scheme IPACompanion -sdk iphonesimulator -configuration Release -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO -derivedDataPath build-sim build
       - name: Package simulator app
