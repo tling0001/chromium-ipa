@@ -38,7 +38,7 @@ struct ReleaseApp: Identifiable, Decodable {
     func value(_ label: String) -> String? {
         guard let body else { return nil }
         for line in body.components(separatedBy: .newlines) {
-            let pattern = #"^\\s*(?:[-*]\\s*)?(?:\\*{1,2})?\\s*"# + NSRegularExpression.escapedPattern(for: label) + #"\\s*(?:\\*{1,2})?\\s*:\\s*(.*?)\\s*$"#
+            let pattern = #"^\s*(?:[-*]\s*)?(?:\*{1,2})?\s*"# + NSRegularExpression.escapedPattern(for: label) + #"\s*(?:\*{1,2})?\s*:\s*(.*?)\s*$"#
             guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
                   let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
                   let range = Range(match.range(at: 1), in: line) else { continue }
@@ -51,9 +51,9 @@ struct ReleaseApp: Identifiable, Decodable {
     private static func clean(_ input: String) -> String {
         var value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         // Strip common Markdown wrappers without changing meaningful punctuation.
-        value = value.replacingOccurrences(of: #"^\\s*[*_]{1,2}(.*?)\\1?[*_]{1,2}\\s*$"#, with: "$1", options: .regularExpression)
-        value = value.replacingOccurrences(of: #"^\\s*\\[(.*?)\\]\\([^)]*\\)\\s*$"#, with: "$1", options: .regularExpression)
-        value = value.replacingOccurrences(of: #"^\\s*`+(.*?)`+\\s*$"#, with: "$1", options: .regularExpression)
+        value = value.replacingOccurrences(of: #"^\s*(?:\*\*|__|\*|_)(.*?)(?:\*\*|__|\*|_)\s*$"#, with: "$1", options: .regularExpression)
+        value = value.replacingOccurrences(of: #"^\s*\[(.*?)\]\([^)]*\)\s*$"#, with: "$1", options: .regularExpression)
+        value = value.replacingOccurrences(of: #"^\s*`+(.*?)`+\s*$"#, with: "$1", options: .regularExpression)
         value = value.trimmingCharacters(in: .whitespacesAndNewlines)
         // Release metadata is sometimes emitted as 'value', "value", or `value`.
         while value.count >= 2 {
@@ -63,6 +63,6 @@ struct ReleaseApp: Identifiable, Decodable {
                 value = value.trimmingCharacters(in: .whitespacesAndNewlines)
             } else { break }
         }
-        return value.replacingOccurrences(of: #"\\s+"#, with: " ", options: .regularExpression)
+        return value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
     }
 }
