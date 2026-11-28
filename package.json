@@ -1,0 +1,1 @@
+{"scripts":{"build":"node scripts/generate_icons.js"},"dependencies":{"sharp":"^0.33.5"}}
