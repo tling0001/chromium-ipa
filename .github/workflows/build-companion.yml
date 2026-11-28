@@ -14,10 +14,21 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen librsvg
-      - name: Generate app icon from website favicon
+      - name: Generate an iOS-compatible opaque app icon
         run: |
-          mkdir -p IPACompanion/Assets.xcassets/AppIcon.appiconset
-          rsvg-convert --width 1024 --height 1024 favicon.svg --output IPACompanion/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          set -euo pipefail
+          ICON_DIR="IPACompanion/Assets.xcassets/AppIcon.appiconset"
+          mkdir -p "$ICON_DIR"
+          # iOS home-screen icons must be opaque. Render the SVG over its
+          # navy background, then round-trip through JPEG to remove alpha.
+          rsvg-convert --width 1024 --height 1024 --background-color "#07102f" favicon.svg --output /tmp/ipa-library-icon-source.png
+          sips -s format jpeg -s formatOptions 100 /tmp/ipa-library-icon-source.png --out /tmp/ipa-library-icon.jpg >/dev/null
+          sips -s format png /tmp/ipa-library-icon.jpg --out "$ICON_DIR/AppIcon.png" >/dev/null
+          sips -g pixelWidth -g pixelHeight -g format -g hasAlpha "$ICON_DIR/AppIcon.png"
+          test "$(sips -g pixelWidth "$ICON_DIR/AppIcon.png" | awk '/pixelWidth:/{print $2}')" = "1024"
+          test "$(sips -g pixelHeight "$ICON_DIR/AppIcon.png" | awk '/pixelHeight:/{print $2}')" = "1024"
+          test "$(sips -g hasAlpha "$ICON_DIR/AppIcon.png" | awk '/hasAlpha:/{print $2}')" = "no"
+          test -f "$ICON_DIR/Contents.json"
       - name: Generate project
         run: xcodegen generate --spec IPACompanion/project.yml
       - name: Build unsigned iOS device app
@@ -30,9 +41,6 @@ jobs:
           test -d "$APP_PATH"
           INFO_PLIST="$APP_PATH/Info.plist"
           test -f "$INFO_PLIST"
-          # XcodeGen's INFOPLIST_KEY_* values are not reliably emitted by every
-          # Xcode version when GENERATE_INFOPLIST_FILE is enabled. Stamp the
-          # canonical version fields into the built product before packaging.
           /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.tling0001.IPACompanion" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.tling0001.IPACompanion" "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$INFO_PLIST"
@@ -40,6 +48,9 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST"
+          echo "Embedded home-screen icon declaration:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$INFO_PLIST"
+          test -s "$APP_PATH/Assets.car"
           ditto "$APP_PATH" artifacts/ipa/Payload/IPACompanion.app
           COPIED_PLIST="artifacts/ipa/Payload/IPACompanion.app/Info.plist"
           python3 - "$COPIED_PLIST" <<'PY'
@@ -50,7 +61,10 @@ jobs:
           missing = [key for key in required if not str(info.get(key, "")).strip()]
           if missing:
               raise SystemExit("Unsigned IPA app metadata missing: " + ", ".join(missing))
-          print("Verified unsigned IPA metadata:", {key: info[key] for key in required})
+          icon = info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
+          if icon.get("CFBundleIconName") != "AppIcon":
+              raise SystemExit("Home-screen AppIcon is not registered in CFBundleIcons: " + repr(icon))
+          print("Verified IPA metadata and home-screen icon:", {key: info[key] for key in required}, icon)
           PY
           rm -rf artifacts/ipa/Payload/IPACompanion.app/_CodeSignature
           rm -f artifacts/ipa/Payload/IPACompanion.app/embedded.mobileprovision
