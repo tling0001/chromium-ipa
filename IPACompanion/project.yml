@@ -11,7 +11,9 @@ targets:
       - path: .
         includes:
           - "**/*.swift"
-    resources:
+      # Asset catalogs must be source inputs so Xcode's asset catalog
+      # compiler (actool) compiles them into Assets.car. Listing an
+      # .xcassets catalog under resources only copies it as a directory.
       - path: Assets.xcassets
     settings:
       base:
