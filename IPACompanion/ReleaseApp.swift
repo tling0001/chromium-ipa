@@ -25,9 +25,12 @@ struct ReleaseApp: Identifiable, Decodable {
     var signingMode: String { (value("Signing mode") ?? "Unknown").lowercased() }
 
     var otaURL: URL? {
-        guard signingMode.replacingOccurrences(of: " ", with: "") == "adhoc", let manifest else { return nil }
-        var components = URLComponents()
-        components.scheme = "itms-services"
+        guard signingMode.replacingOccurrences(of: " ", with: "") == "adhoc",
+              let manifest,
+              manifest.browser_download_url.scheme?.lowercased() == "https" else { return nil }
+        // Apple expects the itms-services URL to have an authority delimiter:
+        // itms-services://?action=download-manifest&url=<encoded HTTPS plist URL>
+        guard var components = URLComponents(string: "itms-services://") else { return nil }
         components.queryItems = [
             URLQueryItem(name: "action", value: "download-manifest"),
             URLQueryItem(name: "url", value: manifest.browser_download_url.absoluteString)
@@ -60,8 +63,6 @@ struct ReleaseApp: Identifiable, Decodable {
 
     private static func clean(_ input: String) -> String {
         var value = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Remove Markdown emphasis and inline-code delimiters even when they
-        // wrap only part of a value (rather than the complete string).
         value = value.replacingOccurrences(of: "**", with: "")
         value = value.replacingOccurrences(of: "__", with: "")
         value = value.replacingOccurrences(of: "`", with: "")
@@ -69,7 +70,6 @@ struct ReleaseApp: Identifiable, Decodable {
         value = value.replacingOccurrences(of: #"^\s*_(.*?)_\s*$"#, with: "$1", options: .regularExpression)
         value = value.replacingOccurrences(of: #"^\s*\[(.*?)\]\([^)]*\)\s*$"#, with: "$1", options: .regularExpression)
         value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Metadata values may be wrapped in one or more quote/backtick pairs.
         while value.count >= 2 {
             let first = value.first!, last = value.last!
             if (first == "'" && last == "'") || (first == "\"" && last == "\"") || (first == "`" && last == "`") {
