@@ -37,12 +37,14 @@ struct CatalogView: View {
                 else if let error=model.error, model.releases.isEmpty { ContentUnavailableView("Catalog unavailable", systemImage:"wifi.exclamationmark", description:Text(error)).overlay(alignment:.bottom){ Button("Retry"){Task{await model.load()}}.padding(.bottom,40) } }
                 else { List(filtered) { app in Button { selected=app } label: { AppRow(app:app) }.buttonStyle(.plain).listRowBackground(Color.clear) }.listStyle(.insetGrouped).scrollContentBackground(.hidden).background(Color.clear) }
             }
-            .navigationTitle("IPA Library")\n            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)\n            .toolbarBackground(.visible, for: .navigationBar)
+            .navigationTitle("IPA Library")
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .searchable(text:$query,prompt:"Search apps")
             .toolbar { ToolbarItem(placement:.topBarTrailing){ Button { Task{await model.load()} } label:{Image(systemName:"arrow.clockwise")} .glassButtonCompat() } }
             .task { await model.load() }
             .refreshable { await model.load() }
-            .sheet(item:$selected){ app in ReleaseDetail(app:app) }
+            .sheet(item:$selected){ app in ReleaseDetail(app:app, model:model) }
         }
     }
 }
@@ -76,7 +78,7 @@ struct ReleaseDetail: View {
                     LabeledContent("Version",value:app.appVersion ?? app.tag_name)
                     if let date=app.published_at { LabeledContent("Published",value:date) }
                 }
-                Section("Install / Update") {
+                Section("Install / Update") {\n                    if model.hasUpdate(app) { Label("Newer version available",systemImage:"arrow.up.circle.fill").foregroundStyle(.orange); Text("Latest: \\(app.appVersion ?? app.tag_name) · Saved installed version: \\(model.trackedVersion(app) ?? "")").font(.caption).foregroundStyle(.secondary) }
                     if let ota=app.otaURL {
                         Link(destination:ota){Label("Install or update on device",systemImage:"arrow.down.app.fill").font(.headline)}
                         Text("Open the OTA installation flow. The signed build and provisioning profile must support this device.").font(.footnote).foregroundStyle(.secondary)
@@ -92,4 +94,15 @@ struct ReleaseDetail: View {
         }
     }
 }
-\n\nprivate extension View {\n    @ViewBuilder func glassCompat() -> some View {\n        if #available(iOS 26.0, *) { self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18)) }\n        else { self }\n    }\n    @ViewBuilder func glassButtonCompat() -> some View {\n        if #available(iOS 26.0, *) { self.buttonStyle(.glass) }\n        else { self.buttonStyle(.bordered) }\n    }\n}\n
+
+
+private extension View {
+    @ViewBuilder func glassCompat() -> some View {
+        if #available(iOS 26.0, *) { self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18)) }
+        else { self }
+    }
+    @ViewBuilder func glassButtonCompat() -> some View {
+        if #available(iOS 26.0, *) { self.buttonStyle(.glass) }
+        else { self.buttonStyle(.bordered) }
+    }
+}
