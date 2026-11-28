@@ -23,10 +23,8 @@ final class CatalogModel: ObservableObject {
     var catalog:[ReleaseApp]{Dictionary(grouping:releases,by:{$0.bundleID ?? $0.appName}).values.compactMap{$0.sorted{($0.published_at ?? "") > ($1.published_at ?? "")}.first}.sorted{($0.published_at ?? "") > ($1.published_at ?? "")}}
     func icon(for app:ReleaseApp)->ReleaseApp.Asset? {
         let key = app.bundleID ?? app.appName
-        return releases
-            .filter { ($0.bundleID ?? $0.appName) == key && $0.icon != nil }
-            .sorted { ($0.published_at ?? "") > ($1.published_at ?? "") }
-            .first?.icon
+        return releases.filter { ($0.bundleID ?? $0.appName) == key && $0.icon != nil }
+            .sorted { ($0.published_at ?? "") > ($1.published_at ?? "") }.first?.icon
     }
     var trackedApps:[ReleaseApp]{catalog.filter{isTracked($0)}}
     var updateApps:[ReleaseApp]{trackedApps.filter{hasUpdate($0)}}
@@ -36,8 +34,7 @@ struct CatalogView:View{
     @StateObject private var model=CatalogModel()
     @State private var query=""
     @State private var selected:ReleaseApp?
-    var filtered:[ReleaseApp]{model.catalog.filter{query.isEmpty || $0.appName.localizedCaseInsensitiveContains(query) || ($0.bundleID ?? "").localizedCaseInsensitiveContains(query)}
-    }
+    var filtered:[ReleaseApp]{model.catalog.filter{query.isEmpty || $0.appName.localizedCaseInsensitiveContains(query) || ($0.bundleID ?? "").localizedCaseInsensitiveContains(query)}}
     var body:some View{
         TabView{
             NavigationStack{
@@ -61,15 +58,9 @@ struct CatalogView:View{
     private var updatesList:some View{
         List{
             if model.trackedApps.isEmpty{ContentUnavailableView("No tracked apps",systemImage:"bookmark",description:Text("Track apps from their catalog details to monitor version updates."))}
-            if !model.updateApps.isEmpty{
-                Section("Updates available"){
-                    ForEach(model.updateApps){app in AppListRow(app:app,model:model,select:{selected=app})}
-                }
-            }
+            if !model.updateApps.isEmpty{Section("Updates available"){ForEach(model.updateApps){app in AppListRow(app:app,model:model,select:{selected=app})}}}
             let current=model.trackedApps.filter{!model.hasUpdate($0)}
-            if !current.isEmpty{Section("Up to date"){
-                ForEach(current){app in AppListRow(app:app,model:model,select:{selected=app})}
-            }}
+            if !current.isEmpty{Section("Up to date"){ForEach(current){app in AppListRow(app:app,model:model,select:{selected=app})}}}
         }.listStyle(.insetGrouped).scrollContentBackground(.hidden)
     }
 }
@@ -81,23 +72,39 @@ struct AppListRow:View{
     var body:some View{
         HStack(spacing:12){
             Button(action:select){AppRow(app:app,icon:model.icon(for:app),trackedVersion:model.trackedVersion(app),updateAvailable:model.hasUpdate(app)).contentShape(Rectangle())}.buttonStyle(.plain)
-            if app.signingMode.replacingOccurrences(of: " ", with: "") == "adhoc" {
+            if app.signingMode.replacingOccurrences(of:" ",with:"") == "adhoc" {
                 if let ota=app.otaURL {
-                    Link(destination:ota){Label("Install",systemImage:"arrow.down.app").font(.subheadline.weight(.semibold))}
-                        .buttonStyle(.borderedProminent).controlSize(.regular).fixedSize()
-                        .accessibilityHint("Install this Ad Hoc app on this device")
+                    InstallPill(url:ota)
                 } else {
-                    Button {} label: {
-                        Label("Install",systemImage:"exclamationmark.circle")
-                    }
-                    .buttonStyle(.bordered).controlSize(.regular).disabled(true).fixedSize()
-                    .accessibilityLabel("Install unavailable: no OTA manifest")
+                    Text("Unavailable").font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                        .padding(.horizontal,10).frame(height:26)
+                        .accessibilityLabel("Install unavailable: no valid Ad Hoc manifest")
                 }
             } else {
                 Button(action:select){Image(systemName:"chevron.right").font(.caption).foregroundStyle(.secondary).padding(8)}
                     .buttonStyle(.plain).accessibilityLabel("App details")
             }
         }
+    }
+}
+
+struct InstallPill:View{
+    let url:URL
+    var title:String="Install"
+    @Environment(\.openURL) private var openURL
+    var body:some View{
+        Button { openURL(url) } label: {
+            Text(title)
+                .font(.system(size:14,weight:.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal,14)
+                .frame(height:28)
+                .background(Color.accentColor,in:Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityHint("Starts Ad Hoc installation using the iOS app installer")
     }
 }
 
@@ -132,8 +139,8 @@ struct ReleaseDetail:View{
                 else{TextField("Installed version (e.g. 1.2.3)",text:$installedVersion).textInputAutocapitalization(.never);Button("Save installed version"){model.track(app,installedVersion:installedVersion.trimmingCharacters(in:.whitespaces))}.disabled(installedVersion.trimmingCharacters(in:.whitespaces).isEmpty);Text("Tracking is stored locally.").font(.footnote).foregroundStyle(.secondary)}
             }
             Section("Install / Update"){
-                if model.hasUpdate(app),let ota=app.otaURL{Link(destination:ota){Label("Install update · Version \(app.appVersion ?? app.tag_name)",systemImage:"arrow.down.app.fill").font(.headline)}}
-                else if let ota=app.otaURL{Link(destination:ota){Label("Install or update on device",systemImage:"arrow.down.app.fill").font(.headline)}}
+                if model.hasUpdate(app),let ota=app.otaURL{InstallPill(url:ota,title:"Install update · Version \(app.appVersion ?? app.tag_name)")}
+                else if let ota=app.otaURL{InstallPill(url:ota,title:"Install or update on device")}
                 if let ipa=app.ipa{Link("Download IPA",destination:ipa.browser_download_url)};Link("View release on GitHub",destination:app.html_url)
             }
             Section("Limitations"){Text("iOS cannot automatically enumerate all installed apps or silently replace app binaries. Tracking is manual. OTA installation may replace an existing app only when signing, bundle ID and provisioning are compatible.")}
