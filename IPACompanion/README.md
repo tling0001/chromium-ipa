@@ -11,3 +11,8 @@ A native iOS/iPadOS companion catalog for releases published by the chromium-ipa
 **Update limitation:** iOS does not expose a general API for listing other installed apps or silently installing/updating their binaries. OTA installation can update an existing app only when the signed app, device, and provisioning/signing conditions are compatible.
 
 Build locally with XcodeGen: `xcodegen generate --spec IPACompanion/project.yml`, then open `IPACompanion.xcodeproj`.
+
+
+## Interface
+
+The companion adopts Liquid Glass controls and surfaces on iOS 26, with material-based visual fallbacks and conventional controls on earlier supported iOS versions (deployment target iOS 17).
