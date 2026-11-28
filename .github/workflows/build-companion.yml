@@ -63,17 +63,17 @@ jobs:
           COPIED_PLIST="artifacts/ipa/Payload/IPACompanion.app/Info.plist"
           python3 - "$COPIED_PLIST" <<'PY'
           import plistlib, sys
-          with open(sys.argv[1], "rb") as f:
-              info = plistlib.load(f)
+          with open(sys.argv[1], "rb") as stream:
+              info = plistlib.load(stream)
           required = ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion")
           missing = [key for key in required if not str(info.get(key, "")).strip()]
           if missing:
               raise SystemExit("Unsigned IPA app metadata missing: " + ", ".join(missing))
-          icon = info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
-          if icon.get("CFBundleIconName") != "AppIcon":
-              raise SystemExit("Home-screen AppIcon is not registered in CFBundleIcons: " + repr(icon))
-          print("Verified IPA metadata and home-screen icon:", {key: info[key] for key in required}, icon)
+          print("Verified copied IPA metadata:", {key: info[key] for key in required})
           PY
+          # Validate the icon declaration using the same plist utility used
+          # to write it; this avoids Python plist key-bridging differences.
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$COPIED_PLIST" | grep -Fx "AppIcon"
           rm -rf artifacts/ipa/Payload/IPACompanion.app/_CodeSignature
           rm -f artifacts/ipa/Payload/IPACompanion.app/embedded.mobileprovision
           cd artifacts/ipa
