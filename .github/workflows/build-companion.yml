@@ -13,13 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: brew install xcodegen librsvg
       - name: Generate app icon from website favicon
         run: |
-          python3 -m venv .icon-venv
-          .icon-venv/bin/pip install --quiet cairosvg
           mkdir -p IPACompanion/Assets.xcassets/AppIcon.appiconset
-          .icon-venv/bin/python -c 'import cairosvg; cairosvg.svg2png(url="favicon.svg", write_to="IPACompanion/Assets.xcassets/AppIcon.appiconset/AppIcon.png", output_width=1024, output_height=1024)'
+          rsvg-convert --width 1024 --height 1024 favicon.svg --output IPACompanion/Assets.xcassets/AppIcon.appiconset/AppIcon.png
       - name: Generate project
         run: xcodegen generate --spec IPACompanion/project.yml
       - name: Build unsigned iOS device app
