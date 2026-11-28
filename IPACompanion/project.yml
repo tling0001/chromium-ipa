@@ -1,0 +1,20 @@
+name: IPACompanion
+options:
+  bundleIdPrefix: com.tling0001
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  IPACompanion:
+    type: application
+    platform: iOS
+    sources:
+      - IPACompanion
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tling0001.IPACompanion
+        SWIFT_VERSION: 5.0
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: IPA Library
+        CODE_SIGNING_ALLOWED: NO
