@@ -41,41 +41,29 @@ jobs:
           test -d "$APP_PATH"
           INFO_PLIST="$APP_PATH/Info.plist"
           test -f "$INFO_PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.tling0001.IPACompanion" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.tling0001.IPACompanion" "$INFO_PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.1" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.1" "$INFO_PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 2" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 2" "$INFO_PLIST"
-          # Explicitly register the compiled asset-catalog icon in the app
-          # Info.plist. Some XcodeGen/Xcode combinations compile AppIcon into
-          # Assets.car but omit CFBundleIcons from the generated plist.
-          for icon_key in "CFBundleIcons" "CFBundleIcons~ipad"; do
-            /usr/libexec/PlistBuddy -c "Add :$icon_key dict" "$INFO_PLIST" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Add :$icon_key:CFBundlePrimaryIcon dict" "$INFO_PLIST" 2>/dev/null || true
-            /usr/libexec/PlistBuddy -c "Set :$icon_key:CFBundlePrimaryIcon:CFBundleIconName AppIcon" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :$icon_key:CFBundlePrimaryIcon:CFBundleIconName string AppIcon" "$INFO_PLIST"
-          done
-          echo "Unsigned app metadata:"
+
+          # Validate the actual Xcode product before packaging. The icon must
+          # have been compiled from Assets.xcassets into Assets.car by actool;
+          # do not synthesize missing app metadata here.
+          test -s "$APP_PATH/Assets.car"
+          plutil -lint "$INFO_PLIST"
+          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST")" = "com.tling0001.IPACompanion"
+          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST")" = "1.1"
+          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST")" = "2"
+          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$INFO_PLIST")" = "AppIcon"
+
+          echo "Validated Xcode-built app:"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$INFO_PLIST"
-          echo "Embedded home-screen icon declaration:"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$INFO_PLIST"
-          test -s "$APP_PATH/Assets.car"
-          # Move the built app into the IPA payload rather than copying it.
-          # This avoids copy failures with Xcode-produced app bundles.
-          mv "$APP_PATH" artifacts/ipa/Payload/IPACompanion.app
-          IPA_APP="artifacts/ipa/Payload/IPACompanion.app"
-          IPA_PLIST="$IPA_APP/Info.plist"
-          plutil -lint "$IPA_PLIST"
-          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$IPA_PLIST")" = "com.tling0001.IPACompanion"
-          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$IPA_PLIST")" = "1.1"
-          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$IPA_PLIST")" = "2"
-          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$IPA_PLIST")" = "AppIcon"
-          echo "Validated IPA app bundle metadata and AppIcon."
-          rm -rf artifacts/ipa/Payload/IPACompanion.app/_CodeSignature
-          rm -f artifacts/ipa/Payload/IPACompanion.app/embedded.mobileprovision
+
+          ditto "$APP_PATH" artifacts/ipa/Payload/IPACompanion.app
+          COPIED_APP="artifacts/ipa/Payload/IPACompanion.app"
+          test -s "$COPIED_APP/Assets.car"
+          plutil -lint "$COPIED_APP/Info.plist"
+
           cd artifacts/ipa
-          # Use Apple's ditto archiver for a deterministic IPA payload archive.
-          # The previous zip invocation returned a non-zero status on the
-          # macOS runner despite completing the preceding metadata checks.
           ditto -c -k --sequesterRsrc --keepParent Payload ../IPACompanion-unsigned.ipa
           cd ../..
           test -s artifacts/IPACompanion-unsigned.ipa
