@@ -44,6 +44,14 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.tling0001.IPACompanion" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.tling0001.IPACompanion" "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$INFO_PLIST"
+          # Explicitly register the compiled asset-catalog icon in the app
+          # Info.plist. Some XcodeGen/Xcode combinations compile AppIcon into
+          # Assets.car but omit CFBundleIcons from the generated plist.
+          for icon_key in "CFBundleIcons" "CFBundleIcons~ipad"; do
+            /usr/libexec/PlistBuddy -c "Add :$icon_key dict" "$INFO_PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :$icon_key:CFBundlePrimaryIcon dict" "$INFO_PLIST" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Set :$icon_key:CFBundlePrimaryIcon:CFBundleIconName AppIcon" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :$icon_key:CFBundlePrimaryIcon:CFBundleIconName string AppIcon" "$INFO_PLIST"
+          done
           echo "Unsigned app metadata:"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST"
