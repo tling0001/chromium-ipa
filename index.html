@@ -75,7 +75,7 @@ function md(markdown){
     blocks.push(table+'</tbody></table>');continue;
    }
    const paragraph=[line.trim()];i++;
-   while(i<items.length&&items[i].trim()&&!heading(items[i])&&!isFence(items[i])&&!isHr(items[i])&&!/^ {0,3}>/.test(items[i])&&!list(items[i])&&!(items[i].includes('|')&&i+1<items.length&&/^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?\\s*$/.test(items[i+1]))){paragraph.push(items[i].trim());i++}
+   while(i<items.length&&items[i].trim()&&!heading(items[i])&&!isFence(items[i])&&!isHr(items[i])&&!/^ {0,3}>/.test(items[i])&&!list(items[i])&&!(items[i].includes('|')&&i+1<items.length&&/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(items[i+1]))){paragraph.push(items[i].trim());i++}
    blocks.push('<p>'+paragraph.map(x=>inline(x)).join(' ')+'</p>');
   }
   return blocks.join('');
