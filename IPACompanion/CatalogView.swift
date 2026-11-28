@@ -1,4 +1,5 @@
 import SwiftUI
+import MarkdownUI
 
 @MainActor
 final class CatalogModel: ObservableObject {
@@ -144,7 +145,7 @@ struct ReleaseDetail:View{
                 if let ipa=app.ipa{Link("Download IPA",destination:ipa.browser_download_url)};Link("View release on GitHub",destination:app.html_url)
             }
             Section("Limitations"){Text("iOS cannot automatically enumerate all installed apps or silently replace app binaries. Tracking is manual. OTA installation may replace an existing app only when signing, bundle ID and provisioning are compatible.")}
-            if let notes=app.body,!notes.isEmpty{Section("Release notes"){Text(notes).textSelection(.enabled)}}
+            if let notes=app.body,!notes.isEmpty{Section("Release notes"){Markdown(notes).textSelection(.enabled)}}
         }.navigationTitle(app.appName).navigationBarTitleDisplayMode(.inline)}
     }
 }
