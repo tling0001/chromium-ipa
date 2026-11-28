@@ -1,12 +1,16 @@
 name: Publish Signed iOS IPA Release
 
 on:
+  workflow_run:
+    workflows: ["Build IPA Library SwiftUI companion"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       ipa_url:
         description: Direct HTTPS URL to an IPA to re-identify, sign using the selected mode, and release
-        required: true
+        required: false
         type: string
+        default: ''
       prerelease:
         description: Mark this release as a prerelease
         required: true
@@ -44,29 +48,56 @@ permissions:
 
 jobs:
   publish:
-    name: Sign and publish supplied iOS IPA
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    name: Sign and publish IPA (automatic Ad Hoc for companion builds)
     runs-on: macos-15
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      IPA_URL: ${{ inputs.ipa_url }}
-      SIGNING_MODE: ${{ inputs.signing_mode }}
+      IPA_URL: ${{ inputs.ipa_url || '' }}
+      SIGNING_MODE: ${{ inputs.signing_mode || 'adhoc' }}
     steps:
       - name: Check out signing helper
         uses: actions/checkout@v4
 
-      - name: Validate URL and download IPA
+      - name: Download unsigned IPA artifact from companion build
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: IPACompanion-unsigned-IPA
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: release/incoming
+
+      - name: Prepare input IPA
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$IPA_URL" =~ ^https:// ]] || { echo "::error::ipa_url must be an HTTPS URL."; exit 1; }
           mkdir -p release
-          curl --fail --location --retry 3 --retry-all-errors --max-time 900 \
-            --output release/input.ipa "$IPA_URL"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+            ipa="$(find release/incoming -type f -name '*.ipa' -print -quit)"
+            [[ -n "$ipa" ]] || { echo "::error::Unsigned IPA artifact not found."; exit 1; }
+            cp "$ipa" release/input.ipa
+          else
+            [[ "$IPA_URL" =~ ^https:// ]] || { echo "::error::For manual runs, ipa_url must be HTTPS."; exit 1; }
+            curl --fail --location --retry 3 --retry-all-errors --max-time 900 --output release/input.ipa "$IPA_URL"
+          fi
           file release/input.ipa | grep -qi 'zip archive' || {
-            echo "::error::The supplied URL did not return a valid IPA/ZIP archive."
+            echo "::error::The input is not a valid IPA/ZIP archive."
             exit 1
           }
+          python - <<'PY'
+          import zipfile, plistlib
+          p='release/input.ipa'
+          with zipfile.ZipFile(p) as z:
+              apps=[n for n in z.namelist() if n.startswith('Payload/') and n.endswith('.app/Info.plist') and n.count('/')==2]
+              if len(apps)!=1: raise SystemExit(f'Expected one main app Info.plist, found {len(apps)}')
+              info=plistlib.loads(z.read(apps[0]))
+              print('Input app bundle:', info.get('CFBundleIdentifier'))
+              print('Input version:', info.get('CFBundleShortVersionString') or info.get('CFBundleVersion'))
+              if not info.get('CFBundleIdentifier'): raise SystemExit('Input IPA lacks CFBundleIdentifier')
+              if not (info.get('CFBundleShortVersionString') or info.get('CFBundleVersion')): raise SystemExit('Input IPA lacks version metadata')
+          PY
 
       - name: Set up Python
         uses: actions/setup-python@v5
