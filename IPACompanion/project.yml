@@ -11,6 +11,8 @@ targets:
       - path: .
         includes:
           - "**/*.swift"
+    resources:
+      - path: Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tling0001.IPACompanion
