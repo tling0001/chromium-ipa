@@ -3,6 +3,8 @@
 A native iOS/iPadOS companion catalog for releases published by the chromium-ipa repository.
 
 - Browse and search the public release catalog.
+- Track apps by manually recording installed versions; versions are stored locally and compared against catalog releases.
+- Highlight newer versions and access update/install links from app details.
 - See app bundle IDs, versions, signing mode, release notes, and artwork.
 - Launch OTA installation for Ad Hoc releases that include a manifest.
 - Download IPA or open the GitHub release page.
