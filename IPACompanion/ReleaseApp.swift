@@ -31,10 +31,12 @@ struct ReleaseApp: Identifiable, Decodable {
         // Apple expects the itms-services URL to have an authority delimiter:
         // itms-services://?action=download-manifest&url=<encoded HTTPS plist URL>
         guard var components = URLComponents(string: "itms-services://") else { return nil }
-        components.queryItems = [
-            URLQueryItem(name: "action", value: "download-manifest"),
-            URLQueryItem(name: "url", value: manifest.browser_download_url.absoluteString)
-        ]
+        let unreserved = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        guard let encodedManifestURL = manifest.browser_download_url.absoluteString.addingPercentEncoding(withAllowedCharacters: unreserved) else { return nil }
+        // Encode the entire nested HTTPS URL as one query value. Leaving its
+        // colon/slashes raw is accepted by generic URL parsers but is not the
+        // canonical OTA form expected by iOS's installer.
+        components.percentEncodedQuery = "action=download-manifest&url=\(encodedManifestURL)"
         return components.url
     }
 
