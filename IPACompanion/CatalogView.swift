@@ -144,15 +144,38 @@ struct ReleaseDetail:View{
     @State private var installedVersion=""
     var body:some View{
         NavigationStack{List{
-            Section{AppRow(app:app,icon:model.icon(for:app),trackedVersion:model.trackedVersion(app),updateAvailable:model.hasUpdate(app));LabeledContent("Bundle ID",value:app.bundleID ?? "Unknown");LabeledContent("Signing",value:app.signingMode.capitalized);LabeledContent("Version",value:app.appVersion ?? app.tag_name);if let date=app.published_at{LabeledContent("Published",value:date)}}
+            Section{
+                HStack(spacing:12){
+                    AsyncImage(url:(model.icon(for:app) ?? app.icon)?.browser_download_url){image in
+                        image.resizable().scaledToFit()
+                    }placeholder:{
+                        Image(systemName:"app.fill").resizable().scaledToFit().padding(12).foregroundStyle(.secondary)
+                    }
+                    .frame(width:54,height:54)
+                    .clipShape(RoundedRectangle(cornerRadius:13))
+                    .background(.thinMaterial,in:RoundedRectangle(cornerRadius:13))
+                    VStack(alignment:.leading,spacing:4){
+                        Text(app.appName).font(.headline)
+                        Text(app.bundleID ?? "").font(.caption).foregroundStyle(.secondary)
+                        Text("Version \\(app.appVersion ?? app.tag_name)").font(.subheadline)
+                        if let tracked=model.trackedVersion(app){Text("Installed \\(tracked)").font(.caption).foregroundStyle(model.hasUpdate(app) ? .orange:.secondary)}
+                        if model.hasUpdate(app){Label("Update available",systemImage:"arrow.up.circle.fill").font(.caption).foregroundStyle(.orange)}
+                    }
+                    Spacer(minLength:4)
+                    if let ota=app.otaURL{InstallPill(url:ota)}
+                }
+                LabeledContent("Bundle ID",value:app.bundleID ?? "Unknown")
+                LabeledContent("Signing",value:app.signingMode.capitalized)
+                LabeledContent("Version",value:app.appVersion ?? app.tag_name)
+                if let date=app.published_at{LabeledContent("Published",value:date)}
+            }
             Section("Track this app"){
                 if let saved=model.trackedVersion(app){LabeledContent("Installed version",value:saved);if model.hasUpdate(app){Label("Update available",systemImage:"arrow.up.circle.fill").foregroundStyle(.orange)};Button("Remove tracking",role:.destructive){model.untrack(app)}}
                 else{TextField("Installed version (e.g. 1.2.3)",text:$installedVersion).textInputAutocapitalization(.never);Button("Save installed version"){model.track(app,installedVersion:installedVersion.trimmingCharacters(in:.whitespaces))}.disabled(installedVersion.trimmingCharacters(in:.whitespaces).isEmpty);Text("Tracking is stored locally.").font(.footnote).foregroundStyle(.secondary)}
             }
             Section("Install / Update"){
-                if model.hasUpdate(app),let ota=app.otaURL{InstallPill(url:ota,title:"Install update · Version \(app.appVersion ?? app.tag_name)")}
-                else if let ota=app.otaURL{InstallPill(url:ota,title:"Install or update on device")}
-                if let ipa=app.ipa{Link("Download IPA",destination:ipa.browser_download_url)};Link("View release on GitHub",destination:app.html_url)
+                if let ipa=app.ipa{Link("Download IPA",destination:ipa.browser_download_url)}
+                Link("View release on GitHub",destination:app.html_url)
             }
             Section("Limitations"){Text("iOS cannot automatically enumerate all installed apps or silently replace app binaries. Tracking is manual. OTA installation may replace an existing app only when signing, bundle ID and provisioning are compatible.")}
             if let notes=app.body,!notes.isEmpty{Section("Release notes"){Markdown(Self.unescapeMarkdown(notes)).textSelection(.enabled)}}
