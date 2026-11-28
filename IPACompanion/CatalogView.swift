@@ -80,8 +80,11 @@ struct AppListRow:View{
                         .buttonStyle(.borderedProminent).controlSize(.regular).fixedSize()
                         .accessibilityHint("Install this Ad Hoc app on this device")
                 } else {
-                    Label("No OTA",systemImage:"exclamationmark.circle").font(.caption).foregroundStyle(.secondary)
-                        .accessibilityLabel("Install unavailable: no OTA manifest")
+                    Button {} label: {
+                        Label("Install",systemImage:"exclamationmark.circle")
+                    }
+                    .buttonStyle(.bordered).controlSize(.regular).disabled(true).fixedSize()
+                    .accessibilityLabel("Install unavailable: no OTA manifest")
                 }
             } else {
                 Button(action:select){Image(systemName:"chevron.right").font(.caption).foregroundStyle(.secondary).padding(8)}
