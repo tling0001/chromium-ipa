@@ -39,12 +39,12 @@ struct CatalogView:View{
         TabView{
             NavigationStack{
                 catalogList(filtered)
-                    .navigationTitle("IPA Library").toolbarBackground(.ultraThinMaterial,for:.navigationBar).toolbarBackground(.visible,for:.navigationBar)
+                    .navigationTitle("IPA Library")
                     .searchable(text:$query,prompt:"Search apps").toolbar{ToolbarItem(placement:.topBarTrailing){Button{Task{await model.load()}}label:{Image(systemName:"arrow.clockwise")}.glassButtonCompat()}}
             }.tabItem{Label("Catalog",systemImage:"square.grid.2x2")}
             NavigationStack{
                 updatesList
-                    .navigationTitle("Updates").toolbarBackground(.ultraThinMaterial,for:.navigationBar).toolbarBackground(.visible,for:.navigationBar)
+                    .navigationTitle("Updates")
                     .toolbar{ToolbarItem(placement:.topBarTrailing){Button{Task{await model.load()}}label:{Image(systemName:"arrow.clockwise")}.glassButtonCompat()}}
             }.tabItem{Label("Updates",systemImage:"arrow.up.circle")}.badge(model.updateApps.count)
         }
