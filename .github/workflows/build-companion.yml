@@ -17,7 +17,7 @@ jobs:
       - name: Generate project
         run: xcodegen generate --spec IPACompanion/project.yml
       - name: Build unsigned iOS device app
-        run: xcodebuild -project IPACompanion.xcodeproj -scheme IPACompanion -sdk iphoneos -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" -derivedDataPath build build
+        run: xcodebuild -project IPACompanion/IPACompanion.xcodeproj -scheme IPACompanion -sdk iphoneos -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" -derivedDataPath build build
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
@@ -25,16 +25,16 @@ jobs:
           APP_PATH="build/Build/Products/Release-iphoneos/IPACompanion.app"
           test -d "$APP_PATH"
           ditto "$APP_PATH" artifacts/ipa/Payload/IPACompanion.app
-          # Remove any signatures and embedded provisioning profiles from the unsigned payload.
           rm -rf artifacts/ipa/Payload/IPACompanion.app/_CodeSignature
           rm -f artifacts/ipa/Payload/IPACompanion.app/embedded.mobileprovision
           cd artifacts/ipa
           zip -qry ../IPACompanion-unsigned.ipa Payload
           cd ../..
       - name: Build simulator app
-        run: xcodebuild -project IPACompanion.xcodeproj -scheme IPACompanion -sdk iphonesimulator -configuration Release -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO -derivedDataPath build-sim build
+        run: xcodebuild -project IPACompanion/IPACompanion.xcodeproj -scheme IPACompanion -sdk iphonesimulator -configuration Release -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO -derivedDataPath build-sim build
       - name: Package simulator app
         run: |
+          set -euo pipefail
           APP_PATH="build-sim/Build/Products/Release-iphonesimulator/IPACompanion.app"
           test -d "$APP_PATH"
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" artifacts/IPA-Library-Simulator.zip
