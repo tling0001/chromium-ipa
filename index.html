@@ -39,7 +39,7 @@ function renderInlineMarkdown(source){
 function md(markdown){
  const source=String(markdown||'').replace(/\r\n?/g,'\n').trim();
  if(!source)return '<p>No release description.</p>';
- const lines=source.split('\n'),out=[];
+ const lines=source.split('\n');
  const isFence=line=>line.startsWith(String.fromCharCode(96).repeat(3))||line.startsWith('~~~');
  const isHr=line=>/^ {0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line);
  const heading=line=>line.match(/^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
@@ -75,7 +75,7 @@ function md(markdown){
     blocks.push(table+'</tbody></table>');continue;
    }
    const paragraph=[line.trim()];i++;
-   while(i<items.length&&items[i].trim()&&!heading(items[i])&&!isFence(items[i])&&!isHr(items[i])&&!/^ {0,3}>/.test(items[i])&&!list(items[i])){paragraph.push(items[i].trim());i++}
+   while(i<items.length&&items[i].trim()&&!heading(items[i])&&!isFence(items[i])&&!isHr(items[i])&&!/^ {0,3}>/.test(items[i])&&!list(items[i])&&!(items[i].includes('|')&&i+1<items.length&&/^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?\\s*$/.test(items[i+1]))){paragraph.push(items[i].trim());i++}
    blocks.push('<p>'+paragraph.map(x=>inline(x)).join(' ')+'</p>');
   }
   return blocks.join('');
