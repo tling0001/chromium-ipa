@@ -35,11 +35,11 @@ struct CatalogView: View {
             Group {
                 if model.loading && model.releases.isEmpty { ProgressView("Loading apps…") }
                 else if let error=model.error, model.releases.isEmpty { ContentUnavailableView("Catalog unavailable", systemImage:"wifi.exclamationmark", description:Text(error)).overlay(alignment:.bottom){ Button("Retry"){Task{await model.load()}}.padding(.bottom,40) } }
-                else { List(filtered) { app in Button { selected=app } label: { AppRow(app:app) }.buttonStyle(.plain) } }
+                else { List(filtered) { app in Button { selected=app } label: { AppRow(app:app) }.buttonStyle(.plain).listRowBackground(Color.clear) }.listStyle(.insetGrouped).scrollContentBackground(.hidden).background(Color.clear) }
             }
-            .navigationTitle("IPA Library")
+            .navigationTitle("IPA Library")\n            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)\n            .toolbarBackground(.visible, for: .navigationBar)
             .searchable(text:$query,prompt:"Search apps")
-            .toolbar { ToolbarItem(placement:.topBarTrailing){ Button { Task{await model.load()} } label:{Image(systemName:"arrow.clockwise")} } }
+            .toolbar { ToolbarItem(placement:.topBarTrailing){ Button { Task{await model.load()} } label:{Image(systemName:"arrow.clockwise")} .buttonStyle(.glass) } }
             .task { await model.load() }
             .refreshable { await model.load() }
             .sheet(item:$selected){ app in ReleaseDetail(app:app) }
@@ -52,7 +52,7 @@ struct AppRow: View {
     var body: some View {
         HStack(spacing:14) {
             AsyncImage(url:app.icon?.browser_download_url){ image in image.resizable().scaledToFit() } placeholder:{ Image(systemName:"app.fill").resizable().scaledToFit().padding(12).foregroundStyle(.secondary) }
-                .frame(width:54,height:54).clipShape(RoundedRectangle(cornerRadius:13))
+                .frame(width:54,height:54).clipShape(RoundedRectangle(cornerRadius:13)).background(.thinMaterial, in:RoundedRectangle(cornerRadius:13))
             VStack(alignment:.leading,spacing:4) {
                 Text(app.appName).font(.headline)
                 Text(app.bundleID ?? "").font(.caption).foregroundStyle(.secondary)
@@ -92,3 +92,4 @@ struct ReleaseDetail: View {
         }
     }
 }
+\n\nprivate extension View {\n    @ViewBuilder func glassCompat() -> some View {\n        if #available(iOS 26.0, *) { self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18)) }\n        else { self }\n    }\n}\n
