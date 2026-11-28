@@ -147,7 +147,14 @@ jobs:
           IPA="$(find source-artifact -type f -name '*.ipa' -print -quit)"
           [[ -n "$IPA" ]] || { echo "::error::No .ipa found in source artifact."; find source-artifact -type f; exit 1; }
           mkdir -p output
-          python scripts/apple_sign_ipa.py "$IPA" "output/Chromium-iOS-$VARIANT-$SIGNING_MODE.ipa" "$SIGNING_MODE"
+          if [[ "$SIGNING_MODE" == "adhoc" ]]; then
+            # Chromium uses the profile-replacement signer preserved from
+            # f8ce18e53d0a8087209ea8c3b1006ca1a85acee3.
+            python scripts/apple_sign_ipa_chromium.py "$IPA" "output/Chromium-iOS-$VARIANT-$SIGNING_MODE.ipa"
+          else
+            # Keep the current general-purpose signer for Development mode.
+            python scripts/apple_sign_ipa.py "$IPA" "output/Chromium-iOS-$VARIANT-$SIGNING_MODE.ipa" "$SIGNING_MODE"
+          fi
 
       - name: Upload signed IPA
         uses: actions/upload-artifact@v4
