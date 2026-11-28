@@ -35,14 +35,24 @@ struct ReleaseApp: Identifiable, Decodable {
         return components.url
     }
 
+    // Release notes commonly bold the entire label, including its colon:
+    // **Bundle ID:** `com.example.app`. Split at the colon first, then
+    // normalize the label instead of assuming Markdown ends before the colon.
     func value(_ label: String) -> String? {
         guard let body else { return nil }
-        for line in body.components(separatedBy: .newlines) {
-            let pattern = #"^\s*(?:[-*]\s*)?(?:\*{1,2})?\s*"# + NSRegularExpression.escapedPattern(for: label) + #"\s*(?:\*{1,2})?\s*:\s*(.*?)\s*$"#
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-                  let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-                  let range = Range(match.range(at: 1), in: line) else { continue }
-            let result = Self.clean(String(line[range]))
+        for rawLine in body.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            var rawLabel = String(line[..<colon])
+            rawLabel = rawLabel.replacingOccurrences(of: #"^\s*[-*]\s*"#, with: "", options: .regularExpression)
+            let normalizedLabel = rawLabel
+                .replacingOccurrences(of: "*", with: "")
+                .replacingOccurrences(of: "_", with: "")
+                .replacingOccurrences(of: "`", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard normalizedLabel.caseInsensitiveCompare(label) == .orderedSame else { continue }
+            let rawValue = String(line[line.index(after: colon)...])
+            let result = Self.clean(rawValue)
             if !result.isEmpty { return result }
         }
         return nil
@@ -50,18 +60,25 @@ struct ReleaseApp: Identifiable, Decodable {
 
     private static func clean(_ input: String) -> String {
         var value = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Strip common Markdown wrappers without changing meaningful punctuation.
-        value = value.replacingOccurrences(of: #"^\s*(?:\*\*|__|\*|_)(.*?)(?:\*\*|__|\*|_)\s*$"#, with: "$1", options: .regularExpression)
+        // Remove Markdown emphasis and inline-code delimiters even when they
+        // wrap only part of a value (rather than the complete string).
+        value = value.replacingOccurrences(of: "**", with: "")
+        value = value.replacingOccurrences(of: "__", with: "")
+        value = value.replacingOccurrences(of: "`", with: "")
+        value = value.replacingOccurrences(of: #"^\s*\*(.*?)\*\s*$"#, with: "$1", options: .regularExpression)
+        value = value.replacingOccurrences(of: #"^\s*_(.*?)_\s*$"#, with: "$1", options: .regularExpression)
         value = value.replacingOccurrences(of: #"^\s*\[(.*?)\]\([^)]*\)\s*$"#, with: "$1", options: .regularExpression)
-        value = value.replacingOccurrences(of: #"^\s*`+(.*?)`+\s*$"#, with: "$1", options: .regularExpression)
         value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Release metadata is sometimes emitted as 'value', "value", or `value`.
+        // Metadata values may be wrapped in one or more quote/backtick pairs.
         while value.count >= 2 {
             let first = value.first!, last = value.last!
             if (first == "'" && last == "'") || (first == "\"" && last == "\"") || (first == "`" && last == "`") {
-                value.removeFirst(); value.removeLast()
+                value.removeFirst()
+                value.removeLast()
                 value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            } else { break }
+            } else {
+                break
+            }
         }
         return value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
     }
