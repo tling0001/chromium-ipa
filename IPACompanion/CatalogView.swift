@@ -40,7 +40,7 @@ struct CatalogView:View{
             NavigationStack{
                 catalogList(filtered)
                     .navigationTitle("IPA Library")
-                    .searchable(text:$query,prompt:"Search apps").toolbar{ToolbarItem(placement:.topBarTrailing){Button{Task{await model.load()}}label:{Image(systemName:"arrow.clockwise")}.glassButtonCompat()}}
+                    .searchable(text:$query,prompt:"Search apps").toolbar{ToolbarItem(placement:.topBarTrailing){Button{Task{await model.load()}}label:{Image(systemName:"arrow.clockwise")}.buttonStyle(.plain)}}
             }.tabItem{Label("Catalog",systemImage:"square.grid.2x2")}
             NavigationStack{
                 updatesList
@@ -148,4 +148,3 @@ struct ReleaseDetail:View{
         }.navigationTitle(app.appName).navigationBarTitleDisplayMode(.inline)}
     }
 }
-private extension View{@ViewBuilder func glassButtonCompat()->some View{if #available(iOS 26.0,*){self.buttonStyle(.glass)}else{self.buttonStyle(.bordered)}}}
