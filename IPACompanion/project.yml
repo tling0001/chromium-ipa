@@ -24,4 +24,6 @@ targets:
         INFOPLIST_KEY_CFBundlePackageType: APPL
         INFOPLIST_KEY_CFBundleSupportedPlatforms: iphoneos
         INFOPLIST_KEY_LSRequiresIPhoneOS: YES
+        INFOPLIST_KEY_CFBundleShortVersionString: "1.0"
+        INFOPLIST_KEY_CFBundleVersion: "1"
         CODE_SIGNING_ALLOWED: NO
