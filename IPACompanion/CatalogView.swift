@@ -45,7 +45,7 @@ struct CatalogView:View{
             NavigationStack{
                 updatesList
                     .navigationTitle("Updates")
-                    .toolbar{ToolbarItem(placement:.topBarTrailing){Button{Task{await model.load()}}label:{Image(systemName:"arrow.clockwise")}.glassButtonCompat()}}
+                    .toolbar{ToolbarItem(placement:.topBarTrailing){Button{Task{await model.load()}}label:{Image(systemName:"arrow.clockwise")}.buttonStyle(.plain)}}
             }.tabItem{Label("Updates",systemImage:"arrow.up.circle")}.badge(model.updateApps.count)
         }
         .task{await model.load()}.refreshable{await model.load()}.sheet(item:$selected){app in ReleaseDetail(app:app,model:model).presentationDetents([.medium,.large]).presentationDragIndicator(.visible)}
