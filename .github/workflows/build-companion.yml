@@ -42,8 +42,8 @@ jobs:
           INFO_PLIST="$APP_PATH/Info.plist"
           test -f "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.tling0001.IPACompanion" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.tling0001.IPACompanion" "$INFO_PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "$INFO_PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.1" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.1" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 2" "$INFO_PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 2" "$INFO_PLIST"
           # Explicitly register the compiled asset-catalog icon in the app
           # Info.plist. Some XcodeGen/Xcode combinations compile AppIcon into
           # Assets.car but omit CFBundleIcons from the generated plist.
@@ -59,21 +59,17 @@ jobs:
           echo "Embedded home-screen icon declaration:"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$INFO_PLIST"
           test -s "$APP_PATH/Assets.car"
-          ditto "$APP_PATH" artifacts/ipa/Payload/IPACompanion.app
-          COPIED_PLIST="artifacts/ipa/Payload/IPACompanion.app/Info.plist"
-          python3 - "$COPIED_PLIST" <<'PY'
-          import plistlib, sys
-          with open(sys.argv[1], "rb") as stream:
-              info = plistlib.load(stream)
-          required = ("CFBundleIdentifier", "CFBundleShortVersionString", "CFBundleVersion")
-          missing = [key for key in required if not str(info.get(key, "")).strip()]
-          if missing:
-              raise SystemExit("Unsigned IPA app metadata missing: " + ", ".join(missing))
-          print("Verified copied IPA metadata:", {key: info[key] for key in required})
-          PY
-          # Validate the icon declaration using the same plist utility used
-          # to write it; this avoids Python plist key-bridging differences.
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$COPIED_PLIST" | grep -Fx "AppIcon"
+          # Move the built app into the IPA payload rather than copying it.
+          # This avoids copy failures with Xcode-produced app bundles.
+          mv "$APP_PATH" artifacts/ipa/Payload/IPACompanion.app
+          IPA_APP="artifacts/ipa/Payload/IPACompanion.app"
+          IPA_PLIST="$IPA_APP/Info.plist"
+          plutil -lint "$IPA_PLIST"
+          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$IPA_PLIST")" = "com.tling0001.IPACompanion"
+          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$IPA_PLIST")" = "1.1"
+          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$IPA_PLIST")" = "2"
+          test "$(/usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" "$IPA_PLIST")" = "AppIcon"
+          echo "Validated IPA app bundle metadata and AppIcon."
           rm -rf artifacts/ipa/Payload/IPACompanion.app/_CodeSignature
           rm -f artifacts/ipa/Payload/IPACompanion.app/embedded.mobileprovision
           cd artifacts/ipa
