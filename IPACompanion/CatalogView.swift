@@ -129,15 +129,14 @@ struct AppRow:View{
 }
 
 struct ReleaseDetail:View{
-    // Release descriptions sometimes arrive with Markdown punctuation escaped
-    // (for example \\*\\*bold\\*\\*). Undo those transport escapes before
-    // parsing so MarkdownUI can render the original formatting.
+    // GitHub release bodies can contain Markdown punctuation escaped with
+    // backslashes (for example \\*\\*bold\\*\\*). Remove the escape slash
+    // before supported Markdown punctuation so MarkdownUI parses the syntax.
     private static func unescapeMarkdown(_ source:String)->String {
-        source.replacingOccurrences(
-            of: #"\\\\([\\\\`*_{}\\[\\]()#+\\-.!>])"#,
-            with: "$1",
-            options: .regularExpression
-        )
+        let escapable = ["\\\\", "`", "*", "_", "{", "}", "[", "]", "(", ")", "#", "+", "-", ".", "!", ">"]
+        return escapable.reduce(source) { text, character in
+            text.replacingOccurrences(of: "\\\\" + character, with: character)
+        }
     }
 
     let app:ReleaseApp
