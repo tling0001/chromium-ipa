@@ -17,4 +17,17 @@ jobs:
       - name: Generate project
         run: xcodegen generate --spec IPACompanion/project.yml
       - name: Build simulator app
-        run: xcodebuild -project IPACompanion.xcodeproj -scheme IPACompanion -sdk iphonesimulator -configuration Release -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+        run: xcodebuild -project IPACompanion.xcodeproj -scheme IPACompanion -sdk iphonesimulator -configuration Release -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO -derivedDataPath build build
+      - name: Package simulator app
+        run: |
+          mkdir -p artifacts
+          APP_PATH="build/Build/Products/Release-iphonesimulator/IPACompanion.app"
+          test -d "$APP_PATH"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" artifacts/IPA-Library-Simulator.zip
+      - name: Upload simulator build
+        uses: actions/upload-artifact@v4
+        with:
+          name: IPA-Library-iOS-Simulator
+          path: artifacts/IPA-Library-Simulator.zip
+          if-no-files-found: error
+          retention-days: 30
