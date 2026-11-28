@@ -37,6 +37,11 @@ on:
         required: false
         type: string
         default: ''
+      skip_nested_code_signing:
+        description: Do not re-sign embedded Mach-O binaries or frameworks (preserve their existing signatures; the app and extensions are still signed)
+        required: true
+        default: false
+        type: boolean
       app_icon_url:
         description: Optional URL to download a custom release app icon as app-icon.png (overrides the IPA-extracted icon)
         required: false
@@ -122,6 +127,7 @@ jobs:
           CUSTOM_MAIN_BUNDLE_ID: ${{ inputs.custom_main_bundle_id }}
           MINIMUM_IOS_VERSION: ${{ inputs.minimum_ios_version }}
           APP_GROUPS_OVERRIDE: ${{ inputs.app_groups }}
+          SKIP_NESTED_CODE_SIGNING: ${{ inputs.skip_nested_code_signing }}
         run: |
           set -euo pipefail
           python scripts/apple_sign_ipa.py release/input.ipa release/signed.ipa "$SIGNING_MODE" "$CUSTOM_MAIN_BUNDLE_ID"
